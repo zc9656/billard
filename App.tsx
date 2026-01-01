@@ -5,7 +5,7 @@ import { DEFAULT_COLORS } from './constants';
 import { 
   Trophy, Play, ChevronRight, Settings2, AlertTriangle,
   Coins, BarChart3, Home as HomeIcon,
-  ArrowLeft, Star, PlusSquare, LogIn, Link2, RefreshCcw, Users, UserCheck, Loader2, Info
+  ArrowLeft, Star, PlusSquare, LogIn, Link2, RefreshCcw, Users, UserCheck, Loader2, Info, XCircle, Copy, CheckCircle2
 } from 'lucide-react';
 import { Peer, DataConnection } from 'peerjs';
 
@@ -35,19 +35,38 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [myId, setMyId] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   
   const connectionsRef = useRef<DataConnection[]>([]);
 
+  // 1. 初始化檢查 URL 參數
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get('room');
+    if (room && room.length === 4) {
+      setInputCode(room);
+    }
+  }, []);
+
   // 廣播最新狀態 (僅房主)
-  const broadcastState = useCallback(() => {
-    if (!isHost || connectionsRef.current.length === 0) return;
-    const state = {
+  const broadcastState = useCallback((targetConn?: DataConnection) => {
+    if (!isHost) return;
+    const stateData = {
       type: 'STATE_UPDATE',
       state: { gameState, betConfig, players, currentOrder, history, commonPot, availableBalls, playerCount }
     };
-    connectionsRef.current.forEach(conn => conn.send(state));
+    
+    if (targetConn) {
+      if (targetConn.open) targetConn.send(stateData);
+    } else if (connectionsRef.current.length > 0) {
+      connectionsRef.current.forEach(conn => {
+        if (conn.open) conn.send(stateData);
+      });
+    }
   }, [gameState, betConfig, players, currentOrder, history, commonPot, availableBalls, isHost, playerCount]);
 
+  // 當關鍵狀態改變時廣播
   useEffect(() => {
     if (isHost) broadcastState();
   }, [gameState, betConfig, players, currentOrder, history, commonPot, availableBalls, broadcastState]);
@@ -57,14 +76,13 @@ const App: React.FC = () => {
     if (isHost && gameState === GameState.WAITING) {
       const namedPlayers = players.filter(p => p.name.trim() !== '');
       if (namedPlayers.length === playerCount) {
-        // 延遲一秒讓大家看到人齊了
-        const timer = setTimeout(() => startGame(), 1500);
+        const timer = setTimeout(() => startGame(), 2000);
         return () => clearTimeout(timer);
       }
     }
   }, [isHost, players, playerCount, gameState]);
 
-  const handleIncomingData = useCallback((data: any) => {
+  const handleIncomingData = useCallback((data: any, conn?: DataConnection) => {
     if (data.type === 'STATE_UPDATE') {
       setGameState(data.state.gameState);
       setBetConfig(data.state.betConfig);
@@ -75,10 +93,9 @@ const App: React.FC = () => {
       setAvailableBalls(data.state.availableBalls);
       setPlayerCount(data.state.playerCount);
     } else if (data.type === 'PLAYER_JOIN' && isHost) {
-      // 房主收到新玩家加入
       setPlayers(prev => {
         const nextIdx = prev.findIndex(p => p.name === '');
-        if (nextIdx === -1) return prev; // 滿了
+        if (nextIdx === -1) return prev; 
         const newPlayers = [...prev];
         newPlayers[nextIdx] = { 
           ...newPlayers[nextIdx], 
@@ -98,15 +115,17 @@ const App: React.FC = () => {
 
   // 初始化房主
   const initHostPeer = () => {
+    setIsConnecting(true);
+    setErrorMsg(null);
     const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const newPeer = new Peer(`billiard-room-${code}`);
+    const newPeer = new Peer(`bill-pro-${code}`);
     
     newPeer.on('open', (id) => {
       setRoomCode(code);
       setPeer(newPeer);
       setIsHost(true);
       setMyId(id);
-      // 初始化空位
+      setIsConnecting(false);
       const initialPlayers = Array.from({ length: playerCount }, (_, i) => ({
         id: i === 0 ? id : `pending-${i}`,
         name: '',
@@ -123,13 +142,19 @@ const App: React.FC = () => {
         setConnections(prev => [...prev, conn]);
         connectionsRef.current = [...connectionsRef.current, conn];
         setIsConnected(true);
+        broadcastState(conn);
       });
-      conn.on('data', handleIncomingData);
+      conn.on('data', (data) => handleIncomingData(data, conn));
+      conn.on('close', () => {
+        setConnections(prev => prev.filter(c => c !== conn));
+        connectionsRef.current = connectionsRef.current.filter(c => c !== conn);
+      });
     });
 
     newPeer.on('error', (err) => {
+      setIsConnecting(false);
       if (err.type === 'unavailable-id') initHostPeer();
-      else alert('連線伺服器失敗，請重試');
+      else setErrorMsg('建立房間失敗，請重試');
     });
   };
 
@@ -137,12 +162,24 @@ const App: React.FC = () => {
   const joinTable = () => {
     if (inputCode.length !== 4 || !tempName) return;
     setIsConnecting(true);
+    setErrorMsg(null);
+    
     const newPeer = new Peer();
     newPeer.on('open', (id) => {
       setPeer(newPeer);
       setMyId(id);
-      const conn = newPeer.connect(`billiard-room-${inputCode}`);
+      const conn = newPeer.connect(`bill-pro-${inputCode}`, { reliable: true });
+      
+      const timeout = setTimeout(() => {
+        if (!conn.open) {
+          setErrorMsg('房間不存在或連線超時');
+          setIsConnecting(false);
+          newPeer.destroy();
+        }
+      }, 8000);
+
       conn.on('open', () => {
+        clearTimeout(timeout);
         setRoomCode(inputCode);
         setConnections([conn]);
         connectionsRef.current = [conn];
@@ -150,20 +187,23 @@ const App: React.FC = () => {
         setIsHost(false);
         setIsConnecting(false);
         setGameState(GameState.WAITING);
-        // 通知房主我進來了
         conn.send({ type: 'PLAYER_JOIN', name: tempName, peerId: id });
       });
+      
       conn.on('data', handleIncomingData);
-      conn.on('error', () => {
-        alert('找不到房間或連線失敗');
-        setIsConnecting(false);
-      });
+    });
+
+    newPeer.on('error', (err) => {
+      setIsConnecting(false);
+      setErrorMsg('連線失敗');
     });
   };
 
-  const requestAction = (actionData: any) => {
-    if (isHost) return;
-    if (connections[0]) connections[0].send({ type: 'ACTION_REQUEST', ...actionData });
+  const copyInviteLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   // --- 遊戲邏輯 ---
@@ -185,15 +225,11 @@ const App: React.FC = () => {
 
   const performReset = (force = false) => {
     if (!isHost && !force) {
-      if (window.confirm('確定要離開房間嗎？')) {
-        if (peer) peer.destroy();
-        window.location.reload();
-      }
+      if (window.confirm('確定要離開嗎？')) window.location.href = window.location.pathname;
       return;
     }
-    if (force || window.confirm('確定要結束並解散房間嗎？')) {
-      if (peer) peer.destroy();
-      window.location.reload();
+    if (force || window.confirm('確定要解散房間嗎？')) {
+      window.location.href = window.location.pathname;
     }
   };
 
@@ -208,7 +244,7 @@ const App: React.FC = () => {
 
   const handleFoul = (playerId: string) => {
     if (!isHost) {
-      requestAction({ action: 'FOUL', playerId });
+      if (connections[0]?.open) connections[0].send({ type: 'ACTION_REQUEST', action: 'FOUL', playerId });
       return;
     }
     updatePlayersEarnings([{ id: playerId, amount: -betConfig.foul }]);
@@ -219,7 +255,7 @@ const App: React.FC = () => {
 
   const handleAction = (winnerId: string, ball: number, isCollectAll: boolean = false) => {
     if (!isHost) {
-      requestAction({ action: 'WIN', playerId: winnerId, ball, isCollectAll });
+      if (connections[0]?.open) connections[0].send({ type: 'ACTION_REQUEST', action: 'WIN', playerId: winnerId, ball, isCollectAll });
       return;
     }
     const winnerIdx = currentOrder.findIndex(p => p.id === winnerId);
@@ -252,7 +288,7 @@ const App: React.FC = () => {
 
   const handleClearTableAction = (winnerId: string, type: 'BIG_CLEAR' | 'SMALL_CLEAR') => {
     if (!isHost) {
-      requestAction({ action: 'CLEAR', playerId: winnerId, clearType: type });
+      if (connections[0]?.open) connections[0].send({ type: 'ACTION_REQUEST', action: 'CLEAR', playerId: winnerId, clearType: type });
       return;
     }
     const winner = currentOrder.find(p => p.id === winnerId)!;
@@ -280,6 +316,8 @@ const App: React.FC = () => {
   // --- 畫面渲染 ---
 
   if (gameState === GameState.HOME) {
+    const isJoiningViaLink = new URLSearchParams(window.location.search).has('room');
+
     return (
       <div className="w-full max-w-4xl mx-auto min-h-screen flex flex-col items-center justify-center p-6 bg-slate-950 text-slate-100">
         <div className="text-center mb-12 animate-in fade-in slide-in-from-top-4">
@@ -288,31 +326,42 @@ const App: React.FC = () => {
           <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">P2P Real-time Connection</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
-          {/* 開桌區 */}
-          <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl space-y-6">
-            <h2 className="text-2xl font-black flex items-center gap-3"><PlusSquare className="text-emerald-500" /> 我要開桌</h2>
-            <div className="space-y-4">
-               <label className="text-xs font-bold text-slate-500 uppercase">1. 選擇遊戲人數</label>
-               <div className="grid grid-cols-2 gap-4">
-                 {[3, 4].map(num => (
-                   <button 
-                    key={num} onClick={() => setPlayerCount(num)}
-                    className={`py-4 rounded-xl font-bold border transition-all ${playerCount === num ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}`}
-                   >
-                     {num} 人制
-                   </button>
-                 ))}
-               </div>
-               <button onClick={initHostPeer} className="w-full bg-emerald-600 hover:bg-emerald-500 py-5 rounded-2xl font-black text-xl transition-all shadow-xl active:scale-95">
-                 建立球桌
-               </button>
-            </div>
+        {errorMsg && (
+          <div className="mb-8 w-full bg-red-500/10 border border-red-500/50 p-4 rounded-2xl flex items-center gap-4 text-red-500 animate-bounce">
+            <XCircle />
+            <span className="font-bold">{errorMsg}</span>
           </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
+          {/* 開桌區 (若不是透過連結進入才顯示) */}
+          {!isJoiningViaLink && (
+            <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl space-y-6">
+              <h2 className="text-2xl font-black flex items-center gap-3"><PlusSquare className="text-emerald-500" /> 我要開桌</h2>
+              <div className="space-y-4">
+                <label className="text-xs font-bold text-slate-500 uppercase">1. 選擇遊戲人數</label>
+                <div className="grid grid-cols-2 gap-4">
+                  {[3, 4].map(num => (
+                    <button 
+                      key={num} onClick={() => setPlayerCount(num)}
+                      className={`py-4 rounded-xl font-bold border transition-all ${playerCount === num ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}`}
+                    >
+                      {num} 人制
+                    </button>
+                  ))}
+                </div>
+                <button onClick={initHostPeer} disabled={isConnecting} className="w-full bg-emerald-600 hover:bg-emerald-500 py-5 rounded-2xl font-black text-xl transition-all shadow-xl active:scale-95 disabled:opacity-50">
+                  {isConnecting ? <Loader2 className="animate-spin mx-auto" /> : '建立球桌'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 加入區 */}
-          <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl space-y-6">
-            <h2 className="text-2xl font-black flex items-center gap-3"><LogIn className="text-indigo-400" /> 加入球桌</h2>
+          <div className={`${isJoiningViaLink ? 'md:col-span-2 max-w-lg mx-auto' : ''} bg-slate-900/50 border border-slate-800 p-8 rounded-[2.5rem] shadow-2xl space-y-6 w-full`}>
+            <h2 className="text-2xl font-black flex items-center gap-3">
+              <LogIn className="text-indigo-400" /> {isJoiningViaLink ? '透過邀請加入' : '加入球桌'}
+            </h2>
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase block mb-2">1. 您的暱稱</label>
@@ -327,12 +376,18 @@ const App: React.FC = () => {
                 <input 
                   type="text" maxLength={4} placeholder="4 位代碼" value={inputCode}
                   onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-indigo-500 font-mono text-2xl tracking-widest text-center"
+                  readOnly={isJoiningViaLink}
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-indigo-500 font-mono text-2xl tracking-widest text-center ${isJoiningViaLink ? 'opacity-50' : ''}`}
                 />
               </div>
               <button onClick={joinTable} disabled={inputCode.length !== 4 || !tempName || isConnecting} className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 py-5 rounded-2xl font-black text-xl flex items-center justify-center gap-3">
-                {isConnecting ? <RefreshCcw className="animate-spin" /> : <Link2 />} 加入遊戲
+                {isConnecting ? <Loader2 className="animate-spin" /> : <Link2 />} 加入遊戲
               </button>
+              {isJoiningViaLink && (
+                <button onClick={() => window.location.href = window.location.pathname} className="w-full text-xs text-slate-500 font-bold hover:text-slate-300">
+                  切換至開桌模式
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -349,20 +404,26 @@ const App: React.FC = () => {
           <div className="absolute top-0 right-0 p-6">
              <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-[10px] font-black uppercase">
                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Wait for Players
+                {joinedCount === playerCount ? 'Ready' : 'Waiting'}
              </div>
           </div>
 
-          <div className="text-center space-y-2">
-            <h2 className="text-sm font-black text-slate-500 uppercase tracking-widest">房間代碼</h2>
-            <div className="text-6xl font-black font-mono tracking-tighter text-emerald-400">{roomCode}</div>
+          <div className="text-center space-y-4">
+            <h2 className="text-sm font-black text-slate-500 uppercase tracking-widest">邀請碼</h2>
+            <div className="flex items-center justify-center gap-4">
+              <div className="text-6xl font-black font-mono tracking-tighter text-emerald-400">{roomCode}</div>
+              <button onClick={copyInviteLink} className={`p-4 rounded-2xl border transition-all ${copied ? 'bg-emerald-500/20 border-emerald-500 text-emerald-500' : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-200'}`}>
+                {copied ? <CheckCircle2 /> : <Copy />}
+              </button>
+            </div>
+            <p className="text-[10px] font-bold text-slate-600 uppercase">點擊圖示複製邀請連結</p>
           </div>
 
           <div className="space-y-4">
             <h3 className="text-xs font-black text-slate-500 uppercase">玩家名單 ({joinedCount}/{playerCount})</h3>
             <div className="grid grid-cols-1 gap-3">
               {players.map((p, i) => (
-                <div key={p.id} className={`p-5 rounded-2xl border flex items-center justify-between ${p.name ? 'bg-slate-900 border-slate-700' : 'bg-slate-950/50 border-slate-800 border-dashed opacity-50'}`}>
+                <div key={p.id} className={`p-5 rounded-2xl border flex items-center justify-between transition-all duration-500 ${p.name ? 'bg-slate-900 border-slate-700 shadow-xl' : 'bg-slate-950/50 border-slate-800 border-dashed opacity-50'}`}>
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black bg-slate-800" style={p.name ? { color: p.color } : {}}>{i + 1}</div>
                     {p.name ? (
@@ -371,27 +432,29 @@ const App: React.FC = () => {
                       <span className="text-slate-600 italic">等待加入...</span>
                     )}
                   </div>
-                  {p.name && <UserCheck className="text-emerald-500" />}
+                  {p.name && <UserCheck className="text-emerald-500 animate-in zoom-in" />}
                 </div>
               ))}
             </div>
           </div>
 
           {isHost && players[0].name === '' && (
-            <div className="space-y-4 pt-4 border-t border-slate-800">
-               <label className="text-xs font-bold text-slate-500 uppercase block">您是房主，請先輸入您的暱稱</label>
+            <div className="space-y-4 pt-4 border-t border-slate-800 animate-in slide-in-from-bottom-2">
+               <label className="text-xs font-bold text-slate-500 uppercase block">房主暱稱</label>
                <div className="flex gap-2">
                  <input 
-                  type="text" placeholder="您的名稱" value={tempName} onChange={(e) => setTempName(e.target.value)}
-                  className="flex-grow bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 font-bold"
+                  type="text" placeholder="輸入您的名稱" value={tempName} onChange={(e) => setTempName(e.target.value)}
+                  className="flex-grow bg-slate-950 border border-slate-800 rounded-xl py-3 px-4 font-bold focus:ring-2 focus:ring-emerald-500"
                  />
                  <button 
-                  onClick={() => setPlayers(prev => {
-                    const newP = [...prev];
-                    newP[0] = { ...newP[0], name: tempName };
-                    return newP;
-                  })}
-                  className="bg-emerald-600 px-6 rounded-xl font-black"
+                  onClick={() => {
+                    setPlayers(prev => {
+                      const newP = [...prev];
+                      newP[0] = { ...newP[0], name: tempName };
+                      return newP;
+                    });
+                  }}
+                  className="bg-emerald-600 px-6 rounded-xl font-black active:scale-95 transition-transform"
                  >
                   確認
                  </button>
@@ -438,13 +501,13 @@ const App: React.FC = () => {
       </header>
 
       {gameState === GameState.PLAYING && (
-        <div className="mb-8 bg-slate-900/40 p-4 rounded-3xl flex items-center justify-center gap-2 overflow-x-auto no-scrollbar border border-slate-800">
+        <div className="mb-8 bg-slate-900/40 p-4 rounded-3xl flex items-center justify-center gap-2 overflow-x-auto no-scrollbar border border-slate-800 shadow-inner">
           {currentOrder.map((p, i) => (
             <React.Fragment key={p.id}>
-              <div className={`flex items-center gap-3 px-5 py-2 rounded-xl transition-all ${i === 0 ? 'bg-emerald-500/20 border border-emerald-500/50 scale-105' : 'opacity-40'}`}>
+              <div className={`flex items-center gap-3 px-5 py-2 rounded-xl transition-all duration-500 ${i === 0 ? 'bg-emerald-500/20 border border-emerald-500/50 scale-110 shadow-lg' : 'opacity-40 scale-90'}`}>
                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
                 <span className="text-sm font-black whitespace-nowrap">{p.name}</span>
-                {p.id === myId && <span className="text-[8px] bg-slate-800 px-1 rounded">YOU</span>}
+                {p.id === myId && <span className="text-[8px] bg-slate-800 px-1 rounded ml-1 font-bold">YOU</span>}
               </div>
               {i < currentOrder.length - 1 && <ChevronRight className="w-4 h-4 text-slate-700" />}
             </React.Fragment>
@@ -456,8 +519,8 @@ const App: React.FC = () => {
         {gameState === GameState.MODE_SELECT && (
           <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 py-12">
             {['369', '59', '9'].map(m => (
-              <button key={m} onClick={() => handleBetModeSelect(m as BetMode)} disabled={!isHost} className="bg-slate-900 p-12 rounded-[3rem] border border-slate-800 hover:border-emerald-500 transition-all disabled:opacity-50">
-                <Trophy className="w-12 h-12 mx-auto mb-4 text-slate-700" />
+              <button key={m} onClick={() => handleBetModeSelect(m as BetMode)} disabled={!isHost} className="bg-slate-900 p-12 rounded-[3rem] border border-slate-800 hover:border-emerald-500 transition-all disabled:opacity-50 group shadow-2xl">
+                <Trophy className="w-12 h-12 mx-auto mb-4 text-slate-700 group-hover:text-amber-500 transition-colors" />
                 <span className="text-xl font-black">{m} 模式</span>
               </button>
             ))}
@@ -465,21 +528,21 @@ const App: React.FC = () => {
         )}
 
         {gameState === GameState.BET_CONFIG && (
-          <div className="max-w-2xl mx-auto bg-slate-900 p-10 rounded-[3rem] border border-slate-800 space-y-8">
+          <div className="max-w-2xl mx-auto bg-slate-900 p-10 rounded-[3rem] border border-slate-800 space-y-8 shadow-2xl">
             <h2 className="text-xl font-black">設定獎金金額</h2>
             <div className="grid grid-cols-1 gap-4">
               {Object.keys(betConfig.amounts).map(b => (
                 <div key={b} className="flex items-center gap-4 bg-slate-950 p-4 rounded-2xl border border-slate-800">
                   <span className="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center font-black">{b}</span>
-                  <input type="number" readOnly={!isHost} value={betConfig.amounts[Number(b)]} onChange={(e) => setBetConfig({...betConfig, amounts: {...betConfig.amounts, [Number(b)]: Number(e.target.value)}})} className="bg-transparent text-2xl font-black w-full text-right" />
+                  <input type="number" readOnly={!isHost} value={betConfig.amounts[Number(b)]} onChange={(e) => setBetConfig({...betConfig, amounts: {...betConfig.amounts, [Number(b)]: Number(e.target.value)}})} className="bg-transparent text-2xl font-black w-full text-right outline-none focus:text-emerald-400" />
                 </div>
               ))}
               <div className="flex items-center gap-4 bg-slate-950 p-4 rounded-2xl border border-slate-800">
                 <span className="text-xs font-bold text-slate-500">基本罰金</span>
-                <input type="number" readOnly={!isHost} value={betConfig.foul} onChange={(e) => setBetConfig({...betConfig, foul: Number(e.target.value)})} className="bg-transparent text-2xl font-black w-full text-right text-red-400" />
+                <input type="number" readOnly={!isHost} value={betConfig.foul} onChange={(e) => setBetConfig({...betConfig, foul: Number(e.target.value)})} className="bg-transparent text-2xl font-black w-full text-right text-red-400 outline-none" />
               </div>
             </div>
-            <button onClick={() => setGameState(GameState.WAITING)} disabled={!isHost} className="w-full bg-emerald-600 py-6 rounded-2xl font-black text-xl disabled:opacity-50">進入等待室</button>
+            <button onClick={() => setGameState(GameState.WAITING)} disabled={!isHost} className="w-full bg-emerald-600 py-6 rounded-2xl font-black text-xl disabled:opacity-50 active:scale-95 transition-transform shadow-xl shadow-emerald-900/20">進入等待室</button>
           </div>
         )}
 
@@ -489,7 +552,7 @@ const App: React.FC = () => {
               <div key={p.id} className={`p-6 rounded-[2.5rem] border flex flex-col justify-between min-h-[420px] transition-all relative ${i === 0 ? 'bg-emerald-500/10 border-emerald-500 shadow-emerald-500/10 shadow-2xl' : 'bg-slate-900/40 border-slate-800'}`}>
                 {i === 0 && (
                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-500 text-white px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                     <Star className="w-3 h-3 fill-white" /> 打家 (Lead)
+                     <Star className="w-3 h-3 fill-white animate-pulse" /> 打家 (Lead)
                    </div>
                 )}
                 
@@ -531,8 +594,8 @@ const App: React.FC = () => {
 
         {(gameState === GameState.PLAYING || gameState === GameState.SUMMARY) && (
           <div className="mt-12 flex flex-col md:flex-row gap-4 max-w-2xl mx-auto">
-             <button onClick={() => setGameState(GameState.SUMMARY)} className="flex-grow bg-slate-900 py-6 rounded-2xl font-black flex items-center justify-center gap-4 border border-slate-800 hover:bg-slate-800 transition-colors"><BarChart3 /> 結算統計</button>
-             <button onClick={() => performReset(false)} className="flex-grow bg-red-600/10 text-red-500 py-6 rounded-2xl font-black flex items-center justify-center gap-4 hover:bg-red-600 hover:text-white transition-all"><HomeIcon /> 離開房間</button>
+             <button onClick={() => setGameState(GameState.SUMMARY)} className="flex-grow bg-slate-900 py-6 rounded-2xl font-black flex items-center justify-center gap-4 border border-slate-800 hover:bg-slate-800 transition-colors shadow-xl"><BarChart3 /> 結算統計</button>
+             <button onClick={() => performReset(false)} className="flex-grow bg-red-600/10 text-red-500 py-6 rounded-2xl font-black flex items-center justify-center gap-4 hover:bg-red-600 hover:text-white transition-all shadow-xl"><HomeIcon /> 離開房間</button>
           </div>
         )}
 
@@ -541,8 +604,8 @@ const App: React.FC = () => {
             <h2 className="text-4xl font-black text-center">比賽結算</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {[...players].sort((a, b) => b.earnings - a.earnings).map((p, idx) => (
-                <div key={p.id} className={`bg-slate-950 p-8 rounded-[2.5rem] border relative overflow-hidden ${idx === 0 ? 'border-amber-500/50 ring-1 ring-amber-500/20 shadow-xl' : 'border-slate-800'}`}>
-                  {idx === 0 && <div className="absolute top-4 right-6"><Trophy className="text-amber-500 w-8 h-8" /></div>}
+                <div key={p.id} className={`bg-slate-950 p-8 rounded-[2.5rem] border relative overflow-hidden transition-all duration-700 ${idx === 0 ? 'border-amber-500/50 ring-1 ring-amber-500/20 shadow-2xl shadow-amber-500/10 scale-105' : 'border-slate-800'}`}>
+                  {idx === 0 && <div className="absolute top-4 right-6 animate-bounce"><Trophy className="text-amber-500 w-8 h-8" /></div>}
                   <div className="absolute top-0 left-0 w-2 h-full" style={{ backgroundColor: p.color }} />
                   <span className="text-[10px] font-bold text-slate-600">RANK {idx + 1}</span>
                   <h3 className="text-3xl font-black mt-2">{p.name} {p.id === myId && "(您)"}</h3>
