@@ -30,6 +30,7 @@ export interface RoundHistory {
 }
 
 export enum GameState {
+  HOME = 'HOME',
   MODE_SELECT = 'MODE_SELECT',
   BET_CONFIG = 'BET_CONFIG',
   SETUP = 'SETUP',

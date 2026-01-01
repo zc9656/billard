@@ -6,13 +6,13 @@ import {
   Trophy, RefreshCcw, UserPlus, Play, RotateCcw, 
   History, CheckCircle2, 
   ChevronRight, DollarSign, Settings2, AlertTriangle,
-  Coins, User, ChevronDown, ChevronUp, BarChart3, Home,
-  ArrowLeft, Zap, Star, ShieldCheck, Link, Link2, Users, Users2, Copy, Check
+  Coins, User, ChevronDown, ChevronUp, BarChart3, Home as HomeIcon,
+  ArrowLeft, Zap, Star, ShieldCheck, Link, Link2, Users, Users2, Copy, Check, PlusSquare, LogIn, Monitor
 } from 'lucide-react';
 import { Peer, DataConnection } from 'peerjs';
 
 const App: React.FC = () => {
-  const [gameState, setGameState] = useState<GameState>(GameState.MODE_SELECT);
+  const [gameState, setGameState] = useState<GameState>(GameState.HOME);
   const [betConfig, setBetConfig] = useState<BetConfig>({ 
     mode: '9', 
     amounts: { 9: 100 }, 
@@ -31,40 +31,16 @@ const App: React.FC = () => {
 
   // --- Multiplayer State ---
   const [peer, setPeer] = useState<Peer | null>(null);
-  const [myPeerId, setMyPeerId] = useState<string>('');
-  const [targetPeerId, setTargetPeerId] = useState<string>('');
+  const [roomCode, setRoomCode] = useState<string>('');
+  const [inputCode, setInputCode] = useState<string>('');
   const [connections, setConnections] = useState<DataConnection[]>([]);
   const [isHost, setIsHost] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const connectionsRef = useRef<DataConnection[]>([]);
 
-  // Initialize Peer
-  useEffect(() => {
-    const newPeer = new Peer();
-    newPeer.on('open', (id) => setMyPeerId(id));
-    
-    newPeer.on('connection', (conn) => {
-      conn.on('open', () => {
-        setConnections(prev => [...prev, conn]);
-        connectionsRef.current = [...connectionsRef.current, conn];
-        setIsConnected(true);
-        // If host, send current state to the new connection
-        if (isHost) {
-          sendStateUpdate(conn);
-        }
-      });
-
-      conn.on('data', (data: any) => {
-        handleIncomingData(data);
-      });
-    });
-
-    setPeer(newPeer);
-    return () => newPeer.destroy();
-  }, [isHost]);
-
-  const handleIncomingData = (data: any) => {
+  // Function to handle incoming data for both Host and Client
+  const handleIncomingData = useCallback((data: any) => {
     if (data.type === 'STATE_UPDATE') {
       setGameState(data.state.gameState);
       setBetConfig(data.state.betConfig);
@@ -74,7 +50,6 @@ const App: React.FC = () => {
       setCommonPot(data.state.commonPot);
       setAvailableBalls(data.state.availableBalls);
     } else if (data.type === 'ACTION_REQUEST' && isHost) {
-      // Host receives action request from client
       if (data.action === 'FOUL') handleFoul(data.playerId);
       if (data.action === 'WIN') handleAction(data.playerId, data.ball, data.isCollectAll);
       if (data.action === 'CLEAR') handleClearTableAction(data.playerId, data.clearType);
@@ -84,8 +59,9 @@ const App: React.FC = () => {
       if (data.action === 'UPDATE_NAME') updatePlayerName(data.playerId, data.name);
       if (data.action === 'GO_SETUP') setGameState(GameState.SETUP);
     }
-  };
+  }, [isHost]);
 
+  // Broadcaster for the Host
   const broadcastState = useCallback(() => {
     if (!isHost || connectionsRef.current.length === 0) return;
     const state = {
@@ -99,46 +75,67 @@ const App: React.FC = () => {
     if (isHost) broadcastState();
   }, [gameState, betConfig, players, currentOrder, history, commonPot, availableBalls, broadcastState]);
 
-  const sendStateUpdate = (conn: DataConnection) => {
-    conn.send({
-      type: 'STATE_UPDATE',
-      state: { gameState, betConfig, players, currentOrder, history, commonPot, availableBalls }
+  const initHostPeer = () => {
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    const newPeer = new Peer(`billiard-room-${code}`);
+    
+    newPeer.on('open', () => {
+      setRoomCode(code);
+      setPeer(newPeer);
+      setIsHost(true);
+      setGameState(GameState.MODE_SELECT);
+    });
+
+    newPeer.on('connection', (conn) => {
+      conn.on('open', () => {
+        setConnections(prev => [...prev, conn]);
+        connectionsRef.current = [...connectionsRef.current, conn];
+        setIsConnected(true);
+        // Initial state sync
+        conn.send({
+          type: 'STATE_UPDATE',
+          state: { gameState, betConfig, players, currentOrder, history, commonPot, availableBalls }
+        });
+      });
+      conn.on('data', handleIncomingData);
+    });
+
+    newPeer.on('error', (err) => {
+      if (err.type === 'unavailable-id') {
+        // Retry if code taken
+        initHostPeer();
+      } else {
+        alert('建立球桌失敗，請重試');
+      }
     });
   };
 
-  const requestAction = (actionData: any) => {
-    if (isHost) {
-      // Local execution if host
-      if (actionData.action === 'FOUL') handleFoul(actionData.playerId);
-      if (actionData.action === 'WIN') handleAction(actionData.playerId, actionData.ball, actionData.isCollectAll);
-      // ... etc (handled by existing functions)
-    } else if (isConnected && connections[0]) {
-      // Request host to perform action
-      connections[0].send({ type: 'ACTION_REQUEST', ...actionData });
-    }
-  };
+  const joinTable = () => {
+    if (inputCode.length !== 4) return;
+    setIsConnecting(true);
+    const newPeer = new Peer();
+    
+    newPeer.on('open', () => {
+      setPeer(newPeer);
+      const conn = newPeer.connect(`billiard-room-${inputCode}`);
+      
+      conn.on('open', () => {
+        setRoomCode(inputCode);
+        setConnections([conn]);
+        connectionsRef.current = [conn];
+        setIsConnected(true);
+        setIsHost(false);
+        setIsConnecting(false);
+      });
 
-  const createRoom = () => {
-    setIsHost(true);
-    // Already listening for connections in useEffect
-  };
-
-  const joinRoom = () => {
-    if (!peer || !targetPeerId) return;
-    const conn = peer.connect(targetPeerId);
-    conn.on('open', () => {
-      setConnections([conn]);
-      connectionsRef.current = [conn];
-      setIsConnected(true);
-      setIsHost(false);
+      conn.on('data', handleIncomingData);
+      
+      conn.on('error', () => {
+        alert('無法加入球桌，請檢查號碼是否正確');
+        setIsConnecting(false);
+        newPeer.destroy();
+      });
     });
-    conn.on('data', (data) => handleIncomingData(data));
-  };
-
-  const copyRoomId = () => {
-    navigator.clipboard.writeText(myPeerId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   // --- Game Logic ---
@@ -153,6 +150,14 @@ const App: React.FC = () => {
     players.forEach(p => balances[p.id] = p.earnings);
     return balances;
   }, [players]);
+
+  const requestAction = (actionData: any) => {
+    if (isHost) {
+      // Host handles it directly via specific functions below
+    } else if (isConnected && connections[0]) {
+      connections[0].send({ type: 'ACTION_REQUEST', ...actionData });
+    }
+  };
 
   const updatePlayerName = (id: string, name: string) => {
     if (!isHost && isConnected) {
@@ -186,9 +191,7 @@ const App: React.FC = () => {
 
   const performReset = (force = false) => {
     if (!isHost && isConnected) {
-      if (window.confirm('請求房主重置遊戲？')) {
-        requestAction({ action: 'RESET' });
-      }
+      if (window.confirm('請求房主重置遊戲？')) requestAction({ action: 'RESET' });
       return;
     }
     if (force || window.confirm('確定要清除所有對局紀錄並回到首頁嗎？')) {
@@ -201,13 +204,9 @@ const App: React.FC = () => {
   };
 
   const handleReturnHome = () => {
-    if (gameState === GameState.SUMMARY) {
-      performReset(true);
-    } else if (gameState === GameState.PLAYING) {
-      performReset(false);
-    } else {
-      setGameState(GameState.MODE_SELECT);
-    }
+    if (gameState === GameState.SUMMARY) performReset(true);
+    else if (gameState === GameState.PLAYING) performReset(false);
+    else setGameState(GameState.MODE_SELECT);
   };
 
   const handleFoul = (playerId: string) => {
@@ -217,7 +216,6 @@ const App: React.FC = () => {
     }
     const player = players.find(p => p.id === playerId)!;
     const foulAmount = betConfig.foul;
-
     setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, earnings: p.earnings - foulAmount } : p));
     setCommonPot(prev => prev + foulAmount);
     setHistory(prev => [{
@@ -263,11 +261,8 @@ const App: React.FC = () => {
       }));
     }
 
-    if (ball === 9) {
-      triggerOrderChange(winnerId);
-    } else {
-      setAvailableBalls(prev => prev.filter(b => b !== ball));
-    }
+    if (ball === 9) triggerOrderChange(winnerId);
+    else setAvailableBalls(prev => prev.filter(b => b !== ball));
 
     setHistory(prev => [{
       id: Date.now().toString(), timestamp: Date.now(), type: 'WIN', ball, winner: winner.name, sitter: isCollectAll ? '全體' : currentOrder[(winnerIdx - 1 + 4) % 4].name, amount: isCollectAll ? amount * 3 : amount, isCollectAll
@@ -319,11 +314,77 @@ const App: React.FC = () => {
     });
   }, [players, history, betConfig.amounts]);
 
+  // Render Logic
+  if (gameState === GameState.HOME) {
+    return (
+      <div className="w-full max-w-4xl mx-auto min-h-screen flex flex-col items-center justify-center p-6 bg-slate-950 text-slate-100 font-sans">
+        <div className="text-center mb-16 animate-in fade-in slide-in-from-top-8 duration-700">
+          <div className="p-5 bg-emerald-500/10 rounded-3xl inline-block mb-6 border border-emerald-500/20 shadow-2xl shadow-emerald-500/10">
+            <Coins className="w-12 h-12 text-emerald-400" />
+          </div>
+          <h1 className="text-4xl md:text-6xl font-black tracking-tighter bg-gradient-to-br from-white via-slate-300 to-slate-500 bg-clip-text text-transparent mb-2">
+            撞球追分 Pro
+          </h1>
+          <p className="text-slate-500 font-bold uppercase tracking-[0.3em] text-xs">Multiplayer Rotation Tracker</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full animate-in zoom-in-95 duration-500 delay-150">
+          <button 
+            onClick={initHostPeer}
+            className="group relative bg-slate-900/50 border border-slate-800 p-10 rounded-[3rem] hover:border-emerald-500/50 hover:bg-slate-900 transition-all text-left shadow-2xl active:scale-95 overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+              <PlusSquare className="w-24 h-24 text-emerald-500" />
+            </div>
+            <div className="relative z-10">
+              <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-emerald-500 transition-colors">
+                <PlusSquare className="w-6 h-6 text-emerald-500 group-hover:text-white" />
+              </div>
+              <h2 className="text-2xl font-black mb-2">開桌</h2>
+              <p className="text-slate-500 text-sm leading-relaxed">建立一個新的比賽房間，並獲得 4 位數球桌代碼讓好友加入。</p>
+            </div>
+          </button>
+
+          <div className="bg-slate-900/50 border border-slate-800 p-10 rounded-[3rem] hover:border-indigo-500/50 hover:bg-slate-900 transition-all shadow-2xl">
+            <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-6">
+              <LogIn className="w-6 h-6 text-indigo-400" />
+            </div>
+            <h2 className="text-2xl font-black mb-4">加入球桌</h2>
+            <div className="space-y-4">
+              <div className="relative">
+                <input 
+                  type="text" 
+                  maxLength={4} 
+                  placeholder="輸入 4 位數代碼" 
+                  value={inputCode}
+                  onChange={(e) => setInputCode(e.target.value.replace(/\D/g, ''))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-2xl py-4 px-6 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 focus:outline-none font-mono text-xl tracking-[0.5em] text-center"
+                />
+              </div>
+              <button 
+                onClick={joinTable}
+                disabled={inputCode.length !== 4 || isConnecting}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed py-4 rounded-2xl font-black text-white transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 active:scale-95"
+              >
+                {isConnecting ? <RefreshCcw className="w-5 h-5 animate-spin" /> : <Link2 className="w-5 h-5" />}
+                {isConnecting ? '連線中...' : '即刻連線'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <footer className="mt-20 opacity-30">
+          <p className="text-[10px] font-black uppercase tracking-[0.5em]">P2P Synchronized Engine v3.0</p>
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-7xl mx-auto min-h-screen flex flex-col p-4 md:p-8 lg:p-12 bg-slate-950 text-slate-100 font-sans transition-all duration-500">
       <header className="mb-8">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-8">
-          <div className="flex items-center gap-4 cursor-pointer group transition-all" onClick={handleReturnHome}>
+          <div className="flex items-center gap-4 cursor-pointer group transition-all" onClick={() => setGameState(GameState.HOME)}>
             <div className="p-3 bg-emerald-500/10 rounded-2xl group-hover:bg-emerald-500/20 transition-colors border border-emerald-500/20">
               <Coins className="w-7 h-7 text-emerald-400" />
             </div>
@@ -331,37 +392,32 @@ const App: React.FC = () => {
               <h1 className="text-2xl md:text-3xl font-black tracking-tight bg-gradient-to-br from-white to-slate-400 bg-clip-text text-transparent">
                 撞球追分 Pro
               </h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Multiplayer Edition</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Table #{roomCode}</p>
+                {isConnected && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+              </div>
             </div>
           </div>
           
           <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto justify-center sm:justify-end">
-             {/* Multiplayer Controls */}
-             <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl shadow-xl">
-                {!isConnected ? (
-                  <>
-                    <button onClick={createRoom} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${isHost ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-100'}`}>
-                      {isHost ? <ShieldCheck className="w-4 h-4" /> : <Users className="w-4 h-4" />}
-                      {isHost ? '房主模式' : '開啟房間'}
-                    </button>
-                    {!isHost && (
-                      <div className="flex items-center bg-slate-950 rounded-xl px-2 border border-slate-800">
-                        <input 
-                          type="text" placeholder="輸入代碼..." 
-                          className="bg-transparent border-none text-[10px] w-20 py-2 focus:ring-0 font-mono"
-                          value={targetPeerId} onChange={(e) => setTargetPeerId(e.target.value)}
-                        />
-                        <button onClick={joinRoom} className="p-1 text-emerald-500 hover:scale-110 transition-transform"><Link2 className="w-4 h-4" /></button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex items-center gap-3 px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] font-black uppercase text-emerald-500">{isHost ? `房主 (連線中: ${connections.length})` : '已連線到房主'}</span>
-                    </div>
-                  </div>
+             {/* Room Info Badge */}
+             <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 px-4 py-2 rounded-2xl shadow-xl">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter">球桌號碼</span>
+                  <span className="text-sm font-mono font-black text-emerald-400 tracking-widest">{roomCode}</span>
+                </div>
+                <div className="h-6 w-px bg-slate-800" />
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-slate-600" />
+                  <span className="text-xs font-black">{isHost ? connections.length + 1 : 2}</span>
+                </div>
+                {isHost && (
+                  <button 
+                    onClick={() => { navigator.clipboard.writeText(roomCode); alert('代碼已複製'); }}
+                    className="p-1.5 hover:bg-slate-800 rounded-lg transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-slate-500" />
+                  </button>
                 )}
              </div>
 
@@ -372,31 +428,13 @@ const App: React.FC = () => {
               </div>
              )}
              
-             {gameState === GameState.PLAYING && (
+             {gameState === GameState.PLAYING && isHost && (
                <button onClick={() => performReset(false)} className="p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-red-400 transition-all border border-slate-800 shadow-lg group">
                  <RotateCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
                </button>
              )}
           </div>
         </div>
-
-        {isHost && !isConnected && (
-          <div className="mb-8 p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-[2rem] flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4">
-             <div className="flex items-center gap-4">
-               <div className="p-3 bg-emerald-500/10 rounded-2xl"><Users2 className="w-6 h-6 text-emerald-500" /></div>
-               <div>
-                 <h3 className="text-sm font-black text-slate-100">你的房間已開啟</h3>
-                 <p className="text-xs text-slate-500">分享下方的 ID 讓球友加入同步</p>
-               </div>
-             </div>
-             <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-2 rounded-2xl group w-full md:w-auto">
-               <code className="px-4 py-2 font-mono text-xs font-bold text-emerald-400 flex-grow text-center">{myPeerId}</code>
-               <button onClick={copyRoomId} className="p-2 bg-slate-900 hover:bg-slate-800 rounded-xl transition-all">
-                 {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-slate-500" />}
-               </button>
-             </div>
-          </div>
-        )}
 
         {gameState === GameState.PLAYING && (
           <div className="bg-slate-900/40 border border-slate-800/60 backdrop-blur-sm rounded-3xl p-5 flex items-center justify-center gap-3 shadow-2xl overflow-x-auto no-scrollbar">
@@ -517,11 +555,15 @@ const App: React.FC = () => {
                 {players.map((p) => (
                   <div key={p.id} className="relative group">
                     <span className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white/20 shadow-[0_0_10px_rgba(255,255,255,0.1)]" style={{ backgroundColor: p.color }} />
-                    <input type="text" value={p.name} onChange={(e) => updatePlayerName(p.id, e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-3xl py-6 pl-16 pr-6 focus:border-emerald-500/50 focus:bg-slate-900 focus:outline-none text-slate-100 font-black text-xl transition-all shadow-inner" />
+                    <input type="text" readOnly={!isHost && isConnected} value={p.name} onChange={(e) => updatePlayerName(p.id, e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-3xl py-6 pl-16 pr-6 focus:border-emerald-500/50 focus:bg-slate-900 focus:outline-none text-slate-100 font-black text-xl transition-all shadow-inner" />
                   </div>
                 ))}
               </div>
-              <button onClick={startGame} className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-4 active:scale-95 text-lg uppercase tracking-widest">
+              <button 
+                onClick={startGame} 
+                disabled={!isHost && isConnected}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-4 active:scale-95 text-lg uppercase tracking-widest"
+              >
                 <Play className="w-7 h-7 fill-current" /> Start Match
               </button>
             </div>
@@ -622,9 +664,11 @@ const App: React.FC = () => {
               <button onClick={() => setGameState(GameState.SUMMARY)} className="flex-grow bg-slate-900 hover:bg-slate-800 border border-slate-800 py-6 rounded-[2rem] font-black text-slate-100 transition-all shadow-2xl flex items-center justify-center gap-4 active:scale-95 group">
                 <BarChart3 className="w-7 h-7 text-indigo-400 group-hover:scale-110 transition-transform" /> <span className="uppercase tracking-[0.2em] text-sm">Match Statistics</span>
               </button>
-              <button onClick={() => performReset(false)} className="flex-grow bg-red-600 hover:bg-red-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-red-600/20 flex items-center justify-center gap-4 active:scale-95 group">
-                <Home className="w-7 h-7 group-hover:scale-110 transition-transform" /> <span className="uppercase tracking-[0.2em] text-sm">Finish Game</span>
-              </button>
+              {isHost && (
+                <button onClick={() => performReset(false)} className="flex-grow bg-red-600 hover:bg-red-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-red-600/20 flex items-center justify-center gap-4 active:scale-95 group">
+                  <HomeIcon className="w-7 h-7 group-hover:scale-110 transition-transform" /> <span className="uppercase tracking-[0.2em] text-sm">Finish Game</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -670,7 +714,7 @@ const App: React.FC = () => {
 
               <div className="pt-12 space-y-4 max-w-xl mx-auto">
                 <button onClick={() => setGameState(GameState.PLAYING)} className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 py-6 rounded-[2rem] font-black text-slate-100 transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95"><ArrowLeft className="w-6 h-6" /><span className="uppercase tracking-widest">Back to Match</span></button>
-                <button onClick={() => performReset(true)} className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/20 active:scale-95"><Home className="w-6 h-6" /><span className="uppercase tracking-widest">Exit Game</span></button>
+                {isHost && <button onClick={() => performReset(true)} className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/20 active:scale-95"><HomeIcon className="w-6 h-6" /><span className="uppercase tracking-widest">Exit Game</span></button>}
               </div>
             </div>
           </div>
@@ -678,7 +722,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-16 py-10 text-center border-t border-slate-900/50">
-        <p className="text-[10px] text-slate-800 font-black uppercase tracking-[0.5em] hover:text-slate-700 transition-colors">Billiards Rotation Order Tracker Engine v2.1 (P2P Linked)</p>
+        <p className="text-[10px] text-slate-800 font-black uppercase tracking-[0.5em] hover:text-slate-700 transition-colors">Billiards Rotation Order Tracker Engine v3.0 (4-Digit Room Sync)</p>
       </footer>
     </div>
   );
