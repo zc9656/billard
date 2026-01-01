@@ -4,6 +4,7 @@ export interface Player {
   name: string;
   color: string;
   earnings: number;
+  isReady?: boolean;
 }
 
 export type BetMode = '369' | '59' | '9';
@@ -33,7 +34,7 @@ export enum GameState {
   HOME = 'HOME',
   MODE_SELECT = 'MODE_SELECT',
   BET_CONFIG = 'BET_CONFIG',
-  SETUP = 'SETUP',
+  WAITING = 'WAITING',
   PLAYING = 'PLAYING',
   SUMMARY = 'SUMMARY'
 }
