@@ -8,7 +8,7 @@ import {
   MessageSquareQuote, History, CheckCircle2, 
   ChevronRight, DollarSign, Settings2, AlertTriangle,
   Coins, User, ChevronDown, ChevronUp, BarChart3, Home,
-  ArrowLeft, Zap, Star
+  ArrowLeft, Zap, Star, ShieldCheck
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -108,7 +108,6 @@ const App: React.FC = () => {
     }, ...prev]);
   };
 
-  // Logic for the rack-ending order change
   const triggerOrderChange = (winnerId: string) => {
     const winnerIdx = currentOrder.findIndex(p => p.id === winnerId);
     const winner = currentOrder[winnerIdx];
@@ -227,7 +226,7 @@ const App: React.FC = () => {
             className="flex items-center gap-4 cursor-pointer group transition-all"
             onClick={handleReturnHome}
           >
-            <div className="p-3 bg-emerald-500/10 rounded-2xl group-hover:bg-emerald-500/20 transition-colors">
+            <div className="p-3 bg-emerald-500/10 rounded-2xl group-hover:bg-emerald-500/20 transition-colors border border-emerald-500/20">
               <Coins className="w-7 h-7 text-emerald-400" />
             </div>
             <div>
@@ -248,10 +247,10 @@ const App: React.FC = () => {
              {gameState === GameState.PLAYING && (
                <button 
                 onClick={() => performReset(false)} 
-                className="p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-red-400 transition-all border border-slate-800 shadow-lg"
+                className="p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-red-400 transition-all border border-slate-800 shadow-lg group"
                 title="重置遊戲"
                >
-                 <RotateCcw className="w-5 h-5" />
+                 <RotateCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
                </button>
              )}
           </div>
@@ -261,7 +260,7 @@ const App: React.FC = () => {
           <div className="bg-slate-900/40 border border-slate-800/60 backdrop-blur-sm rounded-3xl p-5 flex items-center justify-center gap-3 shadow-2xl overflow-x-auto no-scrollbar">
             {currentOrder.map((p, i) => (
               <React.Fragment key={p.id}>
-                <div className={`flex items-center gap-3 px-4 py-2 rounded-xl transition-all ${i === 0 ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30' : 'bg-slate-950/40'}`}>
+                <div className={`flex items-center gap-3 px-4 py-2 rounded-xl transition-all ${i === 0 ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-slate-950/40'}`}>
                   <div className="w-3.5 h-3.5 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.1)] border-2 border-white/10" style={{ backgroundColor: p.color }} />
                   <span className={`text-sm font-black whitespace-nowrap ${i === 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
                     {p.name}
@@ -277,6 +276,7 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-grow">
+        {/* Mode Selection and Setup code remains similar, keeping it concise... */}
         {gameState === GameState.MODE_SELECT && (
           <div className="max-w-4xl mx-auto space-y-12 animate-in fade-in zoom-in-95 duration-500 py-12">
             <div className="text-center space-y-2">
@@ -339,70 +339,35 @@ const App: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                  
-                  <div className="pt-4">
-                    <label className="text-[10px] font-black text-slate-600 uppercase px-4 mb-3 block tracking-[0.3em]">犯規罰金 (Penalty)</label>
-                    <div className="bg-red-500/5 border border-red-500/10 rounded-[2rem] p-5 flex items-center gap-6">
-                      <div className="w-14 h-14 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20">
-                        <AlertTriangle className="w-7 h-7 text-red-500" />
-                      </div>
-                      <div className="relative flex-grow">
-                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-600" />
-                        <input
-                          type="number"
-                          value={betConfig.foul}
-                          onChange={(e) => setBetConfig({ ...betConfig, foul: Number(e.target.value) })}
-                          className="w-full bg-transparent border-none rounded-xl py-3 pl-12 pr-4 focus:ring-0 focus:outline-none text-3xl font-mono font-black text-red-400"
-                        />
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="space-y-4">
-                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">清檯加成 (Table Clear)</h3>
-                   <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
-                    <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-lg shadow-inner group-hover:text-amber-400 transition-colors">
-                      大摸
-                    </div>
-                    <div className="relative flex-grow">
-                      <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-600" />
-                      <input
-                        type="number"
-                        value={betConfig.bigClear}
-                        onChange={(e) => setBetConfig({ ...betConfig, bigClear: Number(e.target.value) })}
-                        className="w-full bg-transparent border-none rounded-xl py-3 pl-12 pr-4 focus:ring-0 focus:outline-none text-3xl font-mono font-black text-slate-100"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
-                    <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-lg shadow-inner group-hover:text-indigo-400 transition-colors">
-                      小摸
-                    </div>
-                    <div className="relative flex-grow">
-                      <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-600" />
-                      <input
-                        type="number"
-                        value={betConfig.smallClear}
-                        onChange={(e) => setBetConfig({ ...betConfig, smallClear: Number(e.target.value) })}
-                        className="w-full bg-transparent border-none rounded-xl py-3 pl-12 pr-4 focus:ring-0 focus:outline-none text-3xl font-mono font-black text-slate-100"
-                      />
-                    </div>
-                  </div>
+                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">摸球與罰金</h3>
+                   <div className="grid grid-cols-1 gap-4">
+                      <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
+                        <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-sm shadow-inner group-hover:text-amber-400 transition-colors">大摸</div>
+                        <input type="number" value={betConfig.bigClear} onChange={(e) => setBetConfig({...betConfig, bigClear: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 px-4 focus:ring-0 text-3xl font-mono font-black text-slate-100" />
+                      </div>
+                      <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
+                        <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-sm shadow-inner group-hover:text-indigo-400 transition-colors">小摸</div>
+                        <input type="number" value={betConfig.smallClear} onChange={(e) => setBetConfig({...betConfig, smallClear: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 px-4 focus:ring-0 text-3xl font-mono font-black text-slate-100" />
+                      </div>
+                      <div className="bg-red-500/5 border border-red-500/10 rounded-3xl p-5 flex items-center gap-6">
+                        <div className="w-14 h-14 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20"><AlertTriangle className="w-7 h-7 text-red-500" /></div>
+                        <input type="number" value={betConfig.foul} onChange={(e) => setBetConfig({...betConfig, foul: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 px-4 focus:ring-0 text-3xl font-mono font-black text-red-400" />
+                      </div>
+                   </div>
                 </div>
               </div>
               
-              <button
-                onClick={() => setGameState(GameState.SETUP)}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-emerald-600/20 active:scale-95 text-lg uppercase tracking-widest mt-8"
-              >
+              <button onClick={() => setGameState(GameState.SETUP)} className="w-full bg-emerald-600 hover:bg-emerald-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-emerald-600/20 active:scale-95 text-lg uppercase tracking-widest mt-8">
                 Continue to Players
               </button>
             </div>
           </div>
         )}
 
+        {/* SETUP state code remains mostly unchanged, skipping for brevity but assuming it is there... */}
         {gameState === GameState.SETUP && (
           <div className="max-w-2xl mx-auto animate-in slide-in-from-right-8 duration-500">
             <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md p-10 rounded-[3rem] space-y-8 shadow-2xl">
@@ -412,30 +377,16 @@ const App: React.FC = () => {
                 </div>
                 <h2 className="text-xl font-black">設定球員名稱</h2>
               </div>
-
               <div className="grid grid-cols-1 gap-4">
                 {players.map((p) => (
                   <div key={p.id} className="relative group">
-                    <span 
-                      className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white/20 shadow-[0_0_10px_rgba(255,255,255,0.1)]" 
-                      style={{ backgroundColor: p.color }} 
-                    />
-                    <input
-                      type="text"
-                      value={p.name}
-                      onChange={(e) => updatePlayerName(p.id, e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-3xl py-6 pl-16 pr-6 focus:border-emerald-500/50 focus:bg-slate-900 focus:outline-none text-slate-100 font-black text-xl transition-all shadow-inner"
-                    />
+                    <span className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white/20 shadow-[0_0_10px_rgba(255,255,255,0.1)]" style={{ backgroundColor: p.color }} />
+                    <input type="text" value={p.name} onChange={(e) => updatePlayerName(p.id, e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-3xl py-6 pl-16 pr-6 focus:border-emerald-500/50 focus:bg-slate-900 focus:outline-none text-slate-100 font-black text-xl transition-all shadow-inner" />
                   </div>
                 ))}
               </div>
-              
-              <button
-                onClick={startGame}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-4 active:scale-95 text-lg uppercase tracking-widest"
-              >
-                <Play className="w-7 h-7 fill-current" />
-                Start Match
+              <button onClick={startGame} className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-4 active:scale-95 text-lg uppercase tracking-widest">
+                <Play className="w-7 h-7 fill-current" /> Start Match
               </button>
             </div>
           </div>
@@ -447,7 +398,7 @@ const App: React.FC = () => {
               {currentOrder.map((p, i) => (
                 <div 
                   key={p.id} 
-                  className={`p-6 rounded-[2.5rem] border backdrop-blur-sm transition-all shadow-2xl flex flex-col justify-between min-h-[340px] ${
+                  className={`p-6 rounded-[2.5rem] border backdrop-blur-sm transition-all shadow-2xl flex flex-col justify-between min-h-[380px] ${
                     i === 0 
                     ? 'bg-emerald-500/10 border-emerald-500/30 ring-1 ring-emerald-500/20' 
                     : 'bg-slate-900/40 border-slate-800'
@@ -463,23 +414,15 @@ const App: React.FC = () => {
                         className="text-red-500/40 hover:text-red-500 p-2.5 rounded-2xl transition-all flex items-center gap-2 bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
                       >
                         <AlertTriangle className="w-4 h-4" />
-                        <span className="text-[10px] font-black uppercase">Foul</span>
+                        <span className="text-[10px] font-black uppercase tracking-tighter">Foul</span>
                       </button>
                     </div>
 
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className={`text-xl font-black ${i === 0 ? 'text-emerald-400' : 'text-slate-100'}`}>{p.name}</span>
-                        {i === 0 && (
-                          <span className="text-[8px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">
-                            Breaker
-                          </span>
-                        )}
-                        {i === 1 && (
-                          <span className="text-[8px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">
-                            2nd
-                          </span>
-                        )}
+                        {i === 0 && <span className="text-[8px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">開球</span>}
+                        {i === 1 && <span className="text-[8px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">第二</span>}
                       </div>
                       <div className="text-sm font-bold opacity-80">
                         <MoneyDisplay val={playerBalances[p.id]} />
@@ -488,13 +431,13 @@ const App: React.FC = () => {
                   </div>
                   
                   <div className="space-y-3 mt-6">
-                    {/* Clear Options - ONLY for Player 1 (Big) and Player 2 (Small) */}
+                    {/* Clear Options with Highlighted Styles */}
                     {(i === 0 || i === 1) && (
-                       <div className="mb-3">
+                       <div className="mb-2">
                           {i === 0 && (
                              <button
                                onClick={() => handleClearTableAction(p.id, 'BIG_CLEAR')}
-                               className="w-full py-4 rounded-xl text-xs font-black bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-900/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                               className="w-full py-4 rounded-xl text-[11px] font-black bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-900/30 hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
                              >
                                <Star className="w-4 h-4 fill-current" />
                                大摸 (${betConfig.bigClear * 3})
@@ -503,7 +446,7 @@ const App: React.FC = () => {
                           {i === 1 && (
                              <button
                                onClick={() => handleClearTableAction(p.id, 'SMALL_CLEAR')}
-                               className="w-full py-4 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-900/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                               className="w-full py-4 rounded-xl text-[11px] font-black bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-900/30 hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
                              >
                                <Star className="w-4 h-4 fill-current" />
                                小摸 (${betConfig.smallClear * 3})
@@ -512,12 +455,13 @@ const App: React.FC = () => {
                        </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* Standard Ball Buttons - GRID LAYOUT TO ENSURE SAME SIZE */}
+                    <div className={`grid ${availableBalls.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
                       {availableBalls.map(ball => (
                         <button
                           key={ball}
                           onClick={() => handleAction(p.id, ball, false)}
-                          className={`py-3.5 rounded-xl text-xs font-black border transition-all active:scale-[0.95] shadow-md flex items-center justify-center gap-1 ${
+                          className={`py-4 rounded-xl text-sm font-black border transition-all active:scale-[0.95] shadow-md flex items-center justify-center gap-1 ${
                             ball === 9 
                             ? 'bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500' 
                             : 'bg-slate-950/80 border-slate-700/50 text-slate-300 hover:bg-slate-800'
@@ -528,8 +472,9 @@ const App: React.FC = () => {
                       ))}
                     </div>
 
+                    {/* Collect All Grid - ONLY for Breaker */}
                     {i === 0 && (
-                      <div className="grid grid-cols-2 gap-2 border-t border-slate-800 pt-3">
+                      <div className={`grid ${availableBalls.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 border-t border-slate-800 pt-3`}>
                          {availableBalls.map(ball => (
                           <button
                             key={`all-${ball}`}
@@ -547,6 +492,7 @@ const App: React.FC = () => {
               ))}
             </div>
 
+            {/* AI Commentary and History... */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 bg-slate-900/30 border border-slate-800/50 p-8 rounded-[2.5rem] shadow-xl space-y-4">
                 <div className="flex justify-between items-center">
@@ -554,11 +500,7 @@ const App: React.FC = () => {
                     <MessageSquareQuote className="w-5 h-5 text-emerald-500" />
                     AI Commentary
                   </span>
-                  <button 
-                    onClick={fetchCommentary} 
-                    disabled={isLoadingCommentary} 
-                    className="text-[10px] font-black uppercase tracking-widest text-emerald-500 hover:text-emerald-400 transition-colors bg-emerald-500/5 px-4 py-2 rounded-xl"
-                  >
+                  <button onClick={fetchCommentary} disabled={isLoadingCommentary} className="text-[10px] font-black uppercase tracking-widest text-emerald-500 hover:text-emerald-400 transition-colors bg-emerald-500/5 px-4 py-2 rounded-xl border border-emerald-500/10">
                     {isLoadingCommentary ? 'Analyzing...' : 'Refresh Tips'}
                   </button>
                 </div>
@@ -568,45 +510,30 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-4">
-                <button 
-                  onClick={() => setShowHistory(!showHistory)}
-                  className="w-full flex items-center justify-between p-6 bg-slate-900/40 border border-slate-800/80 rounded-[2rem] hover:bg-slate-900 transition-all shadow-xl group"
-                >
+                <button onClick={() => setShowHistory(!showHistory)} className="w-full flex items-center justify-between p-6 bg-slate-900/40 border border-slate-800/80 rounded-[2rem] hover:bg-slate-900 transition-all shadow-xl group">
                   <div className="flex items-center gap-4 text-slate-400 group-hover:text-slate-200 transition-colors">
                     <History className="w-5 h-5" />
                     <span className="text-sm font-black uppercase tracking-widest">Match History ({history.length})</span>
                   </div>
                   {showHistory ? <ChevronDown className="w-5 h-5 text-slate-600" /> : <ChevronUp className="w-5 h-5 text-slate-600" />}
                 </button>
-                
                 {showHistory && (
                   <div className="space-y-2 max-h-[280px] overflow-y-auto pr-2 no-scrollbar animate-in slide-in-from-top-4 duration-500">
                     {history.length === 0 ? (
-                      <div className="text-center py-10 text-slate-700 bg-slate-900/20 rounded-3xl border border-dashed border-slate-800">
-                        <p className="text-xs font-black uppercase tracking-widest italic opacity-50">No history yet</p>
-                      </div>
+                      <div className="text-center py-10 text-slate-700 bg-slate-900/20 rounded-3xl border border-dashed border-slate-800"><p className="text-xs font-black uppercase tracking-widest italic opacity-50">No history yet</p></div>
                     ) : (
                       history.map(h => (
                         <div key={h.id} className="bg-slate-950/60 border border-slate-900/50 p-4 rounded-2xl flex justify-between items-center group transition-colors hover:bg-slate-900">
                           <div className="flex items-center gap-3">
                             <div className={`w-1.5 h-1.5 rounded-full ${h.type === 'FOUL' ? 'bg-red-500' : 'bg-emerald-500'}`} />
                             <div className="text-[11px] font-bold">
-                              {h.type === 'FOUL' ? (
-                                <span className="text-red-400/90">Penalty: {h.fouler}</span>
-                              ) : h.type === 'BIG_CLEAR' ? (
-                                <span className="text-amber-400 font-black">BIG CLEAR by {h.winner} [大摸]</span>
-                              ) : h.type === 'SMALL_CLEAR' ? (
-                                <span className="text-indigo-400 font-black">SMALL CLEAR by {h.winner} [小摸]</span>
-                              ) : (
-                                <span className="text-slate-300">
-                                  <span className="text-emerald-400">{h.winner}</span> scored {h.ball} {h.isCollectAll && <span className="text-amber-500 font-black ml-1">[全收]</span>} <span className="text-slate-600 mx-1">/</span> {h.sitter}
-                                </span>
-                              )}
+                              {h.type === 'FOUL' ? <span className="text-red-400/90">Penalty: {h.fouler}</span> : 
+                               h.type === 'BIG_CLEAR' ? <span className="text-amber-400 font-black">大摸 by {h.winner}</span> :
+                               h.type === 'SMALL_CLEAR' ? <span className="text-indigo-400 font-black">小摸 by {h.winner}</span> :
+                               <span className="text-slate-300"><span className="text-emerald-400">{h.winner}</span> scored {h.ball} {h.isCollectAll && <span className="text-amber-500 font-black ml-1">[全收]</span>} <span className="text-slate-600 mx-1">/</span> {h.sitter}</span>}
                             </div>
                           </div>
-                          <span className={`text-[11px] font-mono font-black ${h.type === 'FOUL' ? 'text-amber-500' : 'text-slate-500'}`}>
-                            {h.type === 'FOUL' ? `+${h.amount}` : `$${h.amount}`}
-                          </span>
+                          <span className={`text-[11px] font-mono font-black ${h.type === 'FOUL' ? 'text-amber-500' : 'text-slate-500'}`}>{h.type === 'FOUL' ? `+${h.amount}` : `$${h.amount}`}</span>
                         </div>
                       ))
                     )}
@@ -616,39 +543,26 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-6 mt-12">
-              <button
-                onClick={() => setGameState(GameState.SUMMARY)}
-                className="flex-grow bg-slate-900 hover:bg-slate-800 border border-slate-800 py-6 rounded-[2rem] font-black text-slate-100 transition-all shadow-2xl flex items-center justify-center gap-4 active:scale-95 group"
-              >
-                <BarChart3 className="w-7 h-7 text-indigo-400 group-hover:scale-110 transition-transform" />
-                <span className="uppercase tracking-[0.2em] text-sm">Match Statistics</span>
+              <button onClick={() => setGameState(GameState.SUMMARY)} className="flex-grow bg-slate-900 hover:bg-slate-800 border border-slate-800 py-6 rounded-[2rem] font-black text-slate-100 transition-all shadow-2xl flex items-center justify-center gap-4 active:scale-95 group">
+                <BarChart3 className="w-7 h-7 text-indigo-400 group-hover:scale-110 transition-transform" /> <span className="uppercase tracking-[0.2em] text-sm">Match Statistics</span>
               </button>
-              <button
-                onClick={() => performReset(false)}
-                className="flex-grow bg-red-600 hover:bg-red-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-red-600/20 flex items-center justify-center gap-4 active:scale-95 group"
-              >
-                <Home className="w-7 h-7 group-hover:scale-110 transition-transform" />
-                <span className="uppercase tracking-[0.2em] text-sm">Finish Game</span>
+              <button onClick={() => performReset(false)} className="flex-grow bg-red-600 hover:bg-red-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-red-600/20 flex items-center justify-center gap-4 active:scale-95 group">
+                <Home className="w-7 h-7 group-hover:scale-110 transition-transform" /> <span className="uppercase tracking-[0.2em] text-sm">Finish Game</span>
               </button>
             </div>
           </div>
         )}
 
+        {/* SUMMARY logic updated with clear counts... */}
         {gameState === GameState.SUMMARY && (
           <div className="max-w-6xl mx-auto animate-in fade-in duration-700">
             <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-xl p-10 md:p-16 rounded-[4rem] space-y-12 shadow-2xl">
               <div className="text-center space-y-4">
-                <div className="w-24 h-24 bg-amber-500/10 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 border border-amber-500/20 shadow-2xl shadow-amber-500/10">
-                  <Trophy className="w-12 h-12 text-amber-500" />
-                </div>
+                <div className="w-24 h-24 bg-amber-500/10 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 border border-amber-500/20 shadow-2xl shadow-amber-500/10"><Trophy className="w-12 h-12 text-amber-500" /></div>
                 <h2 className="text-4xl font-black text-slate-100 tracking-tight">比賽結算統計</h2>
                 <div className="flex justify-center gap-6">
-                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.4em] bg-slate-950 px-4 py-2 rounded-full border border-slate-800">
-                    {history.length} ACTIONS
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.4em] bg-slate-950 px-4 py-2 rounded-full border border-slate-800">
-                    POOL: ${commonPot}
-                  </span>
+                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.4em] bg-slate-950 px-4 py-2 rounded-full border border-slate-800">{history.length} ACTIONS</span>
+                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-[0.4em] bg-slate-950 px-4 py-2 rounded-full border border-slate-800">POOL: ${commonPot}</span>
                 </div>
               </div>
 
@@ -661,35 +575,18 @@ const App: React.FC = () => {
                         <span className="font-black text-2xl text-slate-100 block">{p.name}</span>
                         <div className="text-sm font-mono"><MoneyDisplay val={p.earnings} /></div>
                       </div>
-
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-4 border-b border-slate-900 pb-4">
-                          <div className="space-y-1">
-                            <span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter block">大摸</span>
-                            <span className="text-xl font-black text-amber-400">{p.bigClearCount}</span>
-                          </div>
-                          <div className="space-y-1">
-                            <span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter block">小摸</span>
-                            <span className="text-xl font-black text-indigo-400">{p.smallClearCount}</span>
-                          </div>
+                          <div className="space-y-1"><span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter block">大摸</span><span className="text-xl font-black text-amber-400">{p.bigClearCount}</span></div>
+                          <div className="space-y-1"><span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter block">小摸</span><span className="text-xl font-black text-indigo-400">{p.smallClearCount}</span></div>
                         </div>
-
                         {Object.keys(p.ballStats).map(ball => (
                           <div key={ball} className="grid grid-cols-2 gap-4 border-b border-slate-900 pb-4 last:border-0">
-                            <div className="space-y-1">
-                              <span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter">{ball} 贏</span>
-                              <span className="text-xl font-black text-emerald-500">{p.ballStats[ball].win + p.ballStats[ball].all}</span>
-                            </div>
-                            <div className="space-y-1">
-                              <span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter">{ball} 放</span>
-                              <span className="text-xl font-black text-red-400">{p.ballStats[ball].sit}</span>
-                            </div>
+                            <div className="space-y-1"><span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter">{ball} 贏</span><span className="text-xl font-black text-emerald-500">{p.ballStats[ball].win + p.ballStats[ball].all}</span></div>
+                            <div className="space-y-1"><span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter">{ball} 放</span><span className="text-xl font-black text-red-400">{p.ballStats[ball].sit}</span></div>
                           </div>
                         ))}
-                        <div className="pt-2">
-                          <span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter block mb-1">違規次數</span>
-                          <span className="text-2xl font-black text-amber-500">{p.foulCount}</span>
-                        </div>
+                        <div className="pt-2"><span className="text-[9px] text-slate-600 uppercase font-black tracking-tighter block mb-1">違規次數</span><span className="text-2xl font-black text-amber-500">{p.foulCount}</span></div>
                       </div>
                     </div>
                   </div>
@@ -697,20 +594,8 @@ const App: React.FC = () => {
               </div>
 
               <div className="pt-12 space-y-4 max-w-xl mx-auto">
-                <button
-                  onClick={() => setGameState(GameState.PLAYING)}
-                  className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 py-6 rounded-[2rem] font-black text-slate-100 transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95"
-                >
-                  <ArrowLeft className="w-6 h-6" />
-                  <span className="uppercase tracking-widest">Back to Match</span>
-                </button>
-                <button
-                  onClick={() => performReset(true)}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/20 active:scale-95"
-                >
-                  <Home className="w-6 h-6" />
-                  <span className="uppercase tracking-widest">Exit Game</span>
-                </button>
+                <button onClick={() => setGameState(GameState.PLAYING)} className="w-full bg-slate-900 hover:bg-slate-800 border border-slate-800 py-6 rounded-[2rem] font-black text-slate-100 transition-all flex items-center justify-center gap-4 shadow-xl active:scale-95"><ArrowLeft className="w-6 h-6" /><span className="uppercase tracking-widest">Back to Match</span></button>
+                <button onClick={() => performReset(true)} className="w-full bg-indigo-600 hover:bg-indigo-500 py-6 rounded-[2rem] font-black text-white transition-all flex items-center justify-center gap-4 shadow-2xl shadow-indigo-600/20 active:scale-95"><Home className="w-6 h-6" /><span className="uppercase tracking-widest">Exit Game</span></button>
               </div>
             </div>
           </div>
@@ -718,9 +603,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-16 py-10 text-center border-t border-slate-900/50">
-        <p className="text-[10px] text-slate-800 font-black uppercase tracking-[0.5em] hover:text-slate-700 transition-colors">
-          Billiards Rotation Order Tracker Engine v2.0
-        </p>
+        <p className="text-[10px] text-slate-800 font-black uppercase tracking-[0.5em] hover:text-slate-700 transition-colors">Billiards Rotation Order Tracker Engine v2.0</p>
       </footer>
     </div>
   );
