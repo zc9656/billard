@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Player, RoundHistory, GameState, BetMode, BetConfig } from './types';
 import { DEFAULT_COLORS, INITIAL_NAMES } from './constants';
 import { 
@@ -7,8 +7,9 @@ import {
   History, CheckCircle2, 
   ChevronRight, DollarSign, Settings2, AlertTriangle,
   Coins, User, ChevronDown, ChevronUp, BarChart3, Home,
-  ArrowLeft, Zap, Star, ShieldCheck
+  ArrowLeft, Zap, Star, ShieldCheck, Link, Link2, Users, Users2, Copy, Check
 } from 'lucide-react';
+import { Peer, DataConnection } from 'peerjs';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.MODE_SELECT);
@@ -26,9 +27,121 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<RoundHistory[]>([]);
   const [commonPot, setCommonPot] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
-  
   const [availableBalls, setAvailableBalls] = useState<number[]>([]);
 
+  // --- Multiplayer State ---
+  const [peer, setPeer] = useState<Peer | null>(null);
+  const [myPeerId, setMyPeerId] = useState<string>('');
+  const [targetPeerId, setTargetPeerId] = useState<string>('');
+  const [connections, setConnections] = useState<DataConnection[]>([]);
+  const [isHost, setIsHost] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const connectionsRef = useRef<DataConnection[]>([]);
+
+  // Initialize Peer
+  useEffect(() => {
+    const newPeer = new Peer();
+    newPeer.on('open', (id) => setMyPeerId(id));
+    
+    newPeer.on('connection', (conn) => {
+      conn.on('open', () => {
+        setConnections(prev => [...prev, conn]);
+        connectionsRef.current = [...connectionsRef.current, conn];
+        setIsConnected(true);
+        // If host, send current state to the new connection
+        if (isHost) {
+          sendStateUpdate(conn);
+        }
+      });
+
+      conn.on('data', (data: any) => {
+        handleIncomingData(data);
+      });
+    });
+
+    setPeer(newPeer);
+    return () => newPeer.destroy();
+  }, [isHost]);
+
+  const handleIncomingData = (data: any) => {
+    if (data.type === 'STATE_UPDATE') {
+      setGameState(data.state.gameState);
+      setBetConfig(data.state.betConfig);
+      setPlayers(data.state.players);
+      setCurrentOrder(data.state.currentOrder);
+      setHistory(data.state.history);
+      setCommonPot(data.state.commonPot);
+      setAvailableBalls(data.state.availableBalls);
+    } else if (data.type === 'ACTION_REQUEST' && isHost) {
+      // Host receives action request from client
+      if (data.action === 'FOUL') handleFoul(data.playerId);
+      if (data.action === 'WIN') handleAction(data.playerId, data.ball, data.isCollectAll);
+      if (data.action === 'CLEAR') handleClearTableAction(data.playerId, data.clearType);
+      if (data.action === 'RESET') performReset(true);
+      if (data.action === 'START') startGame();
+      if (data.action === 'MODE_SELECT') handleBetModeSelect(data.mode);
+      if (data.action === 'UPDATE_NAME') updatePlayerName(data.playerId, data.name);
+      if (data.action === 'GO_SETUP') setGameState(GameState.SETUP);
+    }
+  };
+
+  const broadcastState = useCallback(() => {
+    if (!isHost || connectionsRef.current.length === 0) return;
+    const state = {
+      type: 'STATE_UPDATE',
+      state: { gameState, betConfig, players, currentOrder, history, commonPot, availableBalls }
+    };
+    connectionsRef.current.forEach(conn => conn.send(state));
+  }, [gameState, betConfig, players, currentOrder, history, commonPot, availableBalls, isHost]);
+
+  useEffect(() => {
+    if (isHost) broadcastState();
+  }, [gameState, betConfig, players, currentOrder, history, commonPot, availableBalls, broadcastState]);
+
+  const sendStateUpdate = (conn: DataConnection) => {
+    conn.send({
+      type: 'STATE_UPDATE',
+      state: { gameState, betConfig, players, currentOrder, history, commonPot, availableBalls }
+    });
+  };
+
+  const requestAction = (actionData: any) => {
+    if (isHost) {
+      // Local execution if host
+      if (actionData.action === 'FOUL') handleFoul(actionData.playerId);
+      if (actionData.action === 'WIN') handleAction(actionData.playerId, actionData.ball, actionData.isCollectAll);
+      // ... etc (handled by existing functions)
+    } else if (isConnected && connections[0]) {
+      // Request host to perform action
+      connections[0].send({ type: 'ACTION_REQUEST', ...actionData });
+    }
+  };
+
+  const createRoom = () => {
+    setIsHost(true);
+    // Already listening for connections in useEffect
+  };
+
+  const joinRoom = () => {
+    if (!peer || !targetPeerId) return;
+    const conn = peer.connect(targetPeerId);
+    conn.on('open', () => {
+      setConnections([conn]);
+      connectionsRef.current = [conn];
+      setIsConnected(true);
+      setIsHost(false);
+    });
+    conn.on('data', (data) => handleIncomingData(data));
+  };
+
+  const copyRoomId = () => {
+    navigator.clipboard.writeText(myPeerId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // --- Game Logic ---
   useEffect(() => {
     if (gameState === GameState.PLAYING || gameState === GameState.SETUP) {
       setAvailableBalls(Object.keys(betConfig.amounts).map(Number).sort((a, b) => a - b));
@@ -42,30 +155,42 @@ const App: React.FC = () => {
   }, [players]);
 
   const updatePlayerName = (id: string, name: string) => {
+    if (!isHost && isConnected) {
+      requestAction({ action: 'UPDATE_NAME', playerId: id, name });
+      return;
+    }
     setPlayers(prev => prev.map(p => p.id === id ? { ...p, name } : p));
   };
 
   const handleBetModeSelect = (mode: BetMode) => {
+    if (!isHost && isConnected) {
+      requestAction({ action: 'MODE_SELECT', mode });
+      return;
+    }
     let initialAmounts: { [key: number]: number } = { 9: 100 };
     if (mode === '369') initialAmounts = { 3: 50, 6: 50, 9: 100 };
     if (mode === '59') initialAmounts = { 5: 50, 9: 100 };
     
-    setBetConfig({ 
-      mode, 
-      amounts: initialAmounts, 
-      foul: 50,
-      bigClear: 300,
-      smallClear: 200
-    });
+    setBetConfig({ mode, amounts: initialAmounts, foul: 50, bigClear: 300, smallClear: 200 });
     setGameState(GameState.BET_CONFIG);
   };
 
   const startGame = () => {
+    if (!isHost && isConnected) {
+      requestAction({ action: 'START' });
+      return;
+    }
     setCurrentOrder([...players]);
     setGameState(GameState.PLAYING);
   };
 
   const performReset = (force = false) => {
+    if (!isHost && isConnected) {
+      if (window.confirm('請求房主重置遊戲？')) {
+        requestAction({ action: 'RESET' });
+      }
+      return;
+    }
     if (force || window.confirm('確定要清除所有對局紀錄並回到首頁嗎？')) {
       setGameState(GameState.MODE_SELECT);
       setHistory([]);
@@ -86,21 +211,17 @@ const App: React.FC = () => {
   };
 
   const handleFoul = (playerId: string) => {
+    if (!isHost && isConnected) {
+      requestAction({ action: 'FOUL', playerId });
+      return;
+    }
     const player = players.find(p => p.id === playerId)!;
     const foulAmount = betConfig.foul;
 
-    setPlayers(prev => prev.map(p => 
-      p.id === playerId ? { ...p, earnings: p.earnings - foulAmount } : p
-    ));
+    setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, earnings: p.earnings - foulAmount } : p));
     setCommonPot(prev => prev + foulAmount);
-
     setHistory(prev => [{
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      type: 'FOUL',
-      fouler: player.name,
-      amount: foulAmount,
-      potUpdate: foulAmount
+      id: Date.now().toString(), timestamp: Date.now(), type: 'FOUL', fouler: player.name, amount: foulAmount, potUpdate: foulAmount
     }, ...prev]);
   };
 
@@ -111,9 +232,7 @@ const App: React.FC = () => {
     const sitter = currentOrder[sitterIdx];
     const sitterPredecessorIdx = (sitterIdx - 1 + 4) % 4;
     const sitterPredecessor = currentOrder[sitterPredecessorIdx];
-    const bystander = currentOrder.find(p => 
-      p.id !== winner.id && p.id !== sitter.id && p.id !== sitterPredecessor.id
-    )!;
+    const bystander = currentOrder.find(p => p.id !== winner.id && p.id !== sitter.id && p.id !== sitterPredecessor.id)!;
 
     const nextOrder = [winner, sitter, bystander, sitterPredecessor];
     setCurrentOrder(nextOrder);
@@ -121,6 +240,10 @@ const App: React.FC = () => {
   };
 
   const handleAction = (winnerId: string, ball: number, isCollectAll: boolean = false) => {
+    if (!isHost && isConnected) {
+      requestAction({ action: 'WIN', playerId: winnerId, ball, isCollectAll });
+      return;
+    }
     const winnerIdx = currentOrder.findIndex(p => p.id === winnerId);
     const winner = currentOrder[winnerIdx];
     const amount = betConfig.amounts[ball] || 0;
@@ -147,18 +270,15 @@ const App: React.FC = () => {
     }
 
     setHistory(prev => [{
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      type: 'WIN',
-      ball,
-      winner: winner.name,
-      sitter: isCollectAll ? '全體' : currentOrder[(winnerIdx - 1 + 4) % 4].name,
-      amount: isCollectAll ? amount * 3 : amount,
-      isCollectAll
+      id: Date.now().toString(), timestamp: Date.now(), type: 'WIN', ball, winner: winner.name, sitter: isCollectAll ? '全體' : currentOrder[(winnerIdx - 1 + 4) % 4].name, amount: isCollectAll ? amount * 3 : amount, isCollectAll
     } as any, ...prev]);
   };
 
   const handleClearTableAction = (winnerId: string, type: 'BIG_CLEAR' | 'SMALL_CLEAR') => {
+    if (!isHost && isConnected) {
+      requestAction({ action: 'CLEAR', playerId: winnerId, clearType: type });
+      return;
+    }
     const winner = currentOrder.find(p => p.id === winnerId)!;
     const amount = type === 'BIG_CLEAR' ? betConfig.bigClear : betConfig.smallClear;
 
@@ -168,14 +288,8 @@ const App: React.FC = () => {
     }));
 
     triggerOrderChange(winnerId);
-
     setHistory(prev => [{
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      type: type,
-      winner: winner.name,
-      amount: amount * 3,
-      isCollectAll: true
+      id: Date.now().toString(), timestamp: Date.now(), type: type, winner: winner.name, amount: amount * 3, isCollectAll: true
     } as any, ...prev]);
   };
 
@@ -196,10 +310,8 @@ const App: React.FC = () => {
           all: history.filter(h => h.type === 'WIN' && h.ball === ball && h.winner === p.name && h.isCollectAll).length,
         };
       });
-
       return {
-        ...p,
-        ballStats,
+        ...p, ballStats,
         bigClearCount: history.filter(h => h.type === 'BIG_CLEAR' && h.winner === p.name).length,
         smallClearCount: history.filter(h => h.type === 'SMALL_CLEAR' && h.winner === p.name).length,
         foulCount: history.filter(h => h.type === 'FOUL' && h.fouler === p.name).length
@@ -211,10 +323,7 @@ const App: React.FC = () => {
     <div className="w-full max-w-7xl mx-auto min-h-screen flex flex-col p-4 md:p-8 lg:p-12 bg-slate-950 text-slate-100 font-sans transition-all duration-500">
       <header className="mb-8">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-8">
-          <div 
-            className="flex items-center gap-4 cursor-pointer group transition-all"
-            onClick={handleReturnHome}
-          >
+          <div className="flex items-center gap-4 cursor-pointer group transition-all" onClick={handleReturnHome}>
             <div className="p-3 bg-emerald-500/10 rounded-2xl group-hover:bg-emerald-500/20 transition-colors border border-emerald-500/20">
               <Coins className="w-7 h-7 text-emerald-400" />
             </div>
@@ -222,28 +331,72 @@ const App: React.FC = () => {
               <h1 className="text-2xl md:text-3xl font-black tracking-tight bg-gradient-to-br from-white to-slate-400 bg-clip-text text-transparent">
                 撞球追分 Pro
               </h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Professional Rotation Tracker</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Multiplayer Edition</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto justify-center sm:justify-end">
+             {/* Multiplayer Controls */}
+             <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl shadow-xl">
+                {!isConnected ? (
+                  <>
+                    <button onClick={createRoom} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${isHost ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-100'}`}>
+                      {isHost ? <ShieldCheck className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+                      {isHost ? '房主模式' : '開啟房間'}
+                    </button>
+                    {!isHost && (
+                      <div className="flex items-center bg-slate-950 rounded-xl px-2 border border-slate-800">
+                        <input 
+                          type="text" placeholder="輸入代碼..." 
+                          className="bg-transparent border-none text-[10px] w-20 py-2 focus:ring-0 font-mono"
+                          value={targetPeerId} onChange={(e) => setTargetPeerId(e.target.value)}
+                        />
+                        <button onClick={joinRoom} className="p-1 text-emerald-500 hover:scale-110 transition-transform"><Link2 className="w-4 h-4" /></button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-3 px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[10px] font-black uppercase text-emerald-500">{isHost ? `房主 (連線中: ${connections.length})` : '已連線到房主'}</span>
+                    </div>
+                  </div>
+                )}
+             </div>
+
              {(gameState === GameState.PLAYING || gameState === GameState.SUMMARY) && (
               <div className="bg-slate-900 border border-slate-800 px-5 py-2 rounded-2xl flex items-center gap-3 shadow-xl">
                 <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest border-r border-slate-800 pr-3">公錢池</span>
                 <span className="text-xl font-mono font-black text-amber-400">${commonPot}</span>
               </div>
              )}
+             
              {gameState === GameState.PLAYING && (
-               <button 
-                onClick={() => performReset(false)} 
-                className="p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-red-400 transition-all border border-slate-800 shadow-lg group"
-                title="重置遊戲"
-               >
+               <button onClick={() => performReset(false)} className="p-3 bg-slate-900 hover:bg-slate-800 rounded-2xl text-slate-500 hover:text-red-400 transition-all border border-slate-800 shadow-lg group">
                  <RotateCcw className="w-5 h-5 group-active:rotate-180 transition-transform duration-500" />
                </button>
              )}
           </div>
         </div>
+
+        {isHost && !isConnected && (
+          <div className="mb-8 p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-[2rem] flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4">
+             <div className="flex items-center gap-4">
+               <div className="p-3 bg-emerald-500/10 rounded-2xl"><Users2 className="w-6 h-6 text-emerald-500" /></div>
+               <div>
+                 <h3 className="text-sm font-black text-slate-100">你的房間已開啟</h3>
+                 <p className="text-xs text-slate-500">分享下方的 ID 讓球友加入同步</p>
+               </div>
+             </div>
+             <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 p-2 rounded-2xl group w-full md:w-auto">
+               <code className="px-4 py-2 font-mono text-xs font-bold text-emerald-400 flex-grow text-center">{myPeerId}</code>
+               <button onClick={copyRoomId} className="p-2 bg-slate-900 hover:bg-slate-800 rounded-xl transition-all">
+                 {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-slate-500" />}
+               </button>
+             </div>
+          </div>
+        )}
 
         {gameState === GameState.PLAYING && (
           <div className="bg-slate-900/40 border border-slate-800/60 backdrop-blur-sm rounded-3xl p-5 flex items-center justify-center gap-3 shadow-2xl overflow-x-auto no-scrollbar">
@@ -251,13 +404,9 @@ const App: React.FC = () => {
               <React.Fragment key={p.id}>
                 <div className={`flex items-center gap-3 px-4 py-2 rounded-xl transition-all ${i === 0 ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-slate-950/40'}`}>
                   <div className="w-3.5 h-3.5 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.1)] border-2 border-white/10" style={{ backgroundColor: p.color }} />
-                  <span className={`text-sm font-black whitespace-nowrap ${i === 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
-                    {p.name}
-                  </span>
+                  <span className={`text-sm font-black whitespace-nowrap ${i === 0 ? 'text-emerald-400' : 'text-slate-300'}`}>{p.name}</span>
                 </div>
-                {i < currentOrder.length - 1 && (
-                  <ChevronRight className="w-5 h-5 text-slate-800 flex-shrink-0" />
-                )}
+                {i < currentOrder.length - 1 && <ChevronRight className="w-5 h-5 text-slate-800 flex-shrink-0" />}
               </React.Fragment>
             ))}
           </div>
@@ -273,16 +422,17 @@ const App: React.FC = () => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
-                { id: '369', label: '3, 6, 9 模式', desc: '適合高手對決', color: 'emerald' },
-                { id: '59', label: '5, 9 模式', desc: '標準追分規則', color: 'indigo' },
-                { id: '9', label: '單 9 模式', desc: '純技術比拚', color: 'slate' }
+                { id: '369', label: '3, 6, 9 模式', desc: '適合高手對決' },
+                { id: '59', label: '5, 9 模式', desc: '標準追分規則' },
+                { id: '9', label: '單 9 模式', desc: '純技術比拚' }
               ].map(mode => (
                 <button
                   key={mode.id}
                   onClick={() => handleBetModeSelect(mode.id as BetMode)}
-                  className="bg-slate-900/40 border border-slate-800/80 p-8 rounded-[2.5rem] flex flex-col items-center text-center gap-6 hover:border-emerald-500/40 hover:bg-slate-900 transition-all group active:scale-[0.97] shadow-2xl relative overflow-hidden"
+                  disabled={!isHost && isConnected}
+                  className="bg-slate-900/40 border border-slate-800/80 p-8 rounded-[2.5rem] flex flex-col items-center text-center gap-6 hover:border-emerald-500/40 hover:bg-slate-900 transition-all group active:scale-[0.97] shadow-2xl relative overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <div className={`w-16 h-16 rounded-full bg-slate-950 flex items-center justify-center border border-slate-800 group-hover:border-emerald-500/30 transition-colors`}>
+                  <div className="w-16 h-16 rounded-full bg-slate-950 flex items-center justify-center border border-slate-800 group-hover:border-emerald-500/30 transition-colors">
                     <Trophy className="w-8 h-8 text-slate-600 group-hover:text-emerald-500 transition-colors" />
                   </div>
                   <div>
@@ -299,30 +449,27 @@ const App: React.FC = () => {
           <div className="max-w-4xl mx-auto animate-in slide-in-from-right-8 duration-500">
             <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md p-10 rounded-[3rem] space-y-8 shadow-2xl">
               <div className="flex items-center gap-4 mb-2">
-                <div className="p-3 bg-indigo-500/10 rounded-2xl">
-                  <Settings2 className="w-6 h-6 text-indigo-400" />
-                </div>
-                <h2 className="text-xl font-black">賭注金額配置</h2>
+                <div className="p-3 bg-indigo-500/10 rounded-2xl"><Settings2 className="w-6 h-6 text-indigo-400" /></div>
+                <h2 className="text-xl font-black">賭注金額配置 {!isHost && isConnected && '(僅房主可修改)'}</h2>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-4">
                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">進球賞金</h3>
                    {Object.keys(betConfig.amounts).map(ball => (
-                    <div key={ball} className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
-                      <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-2xl shadow-inner group-hover:text-emerald-400 transition-colors">
+                    <div key={ball} className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group">
+                      <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-2xl shadow-inner group-hover:text-emerald-400">
                         {ball}
                       </div>
                       <div className="relative flex-grow">
                         <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-600" />
                         <input
-                          type="number"
+                          type="number" readOnly={!isHost && isConnected}
                           value={betConfig.amounts[Number(ball)]}
                           onChange={(e) => setBetConfig({
-                            ...betConfig,
-                            amounts: { ...betConfig.amounts, [Number(ball)]: Number(e.target.value) }
+                            ...betConfig, amounts: { ...betConfig.amounts, [Number(ball)]: Number(e.target.value) }
                           })}
-                          className="w-full bg-transparent border-none rounded-xl py-3 pl-12 pr-4 focus:ring-0 focus:outline-none text-3xl font-mono font-black text-slate-100"
+                          className="w-full bg-transparent border-none py-3 pl-12 focus:ring-0 text-3xl font-mono font-black text-slate-100"
                         />
                       </div>
                     </div>
@@ -332,23 +479,27 @@ const App: React.FC = () => {
                 <div className="space-y-4">
                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest px-2">摸球與罰金</h3>
                    <div className="grid grid-cols-1 gap-4">
-                      <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
-                        <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-sm shadow-inner group-hover:text-amber-400 transition-colors">大摸</div>
-                        <input type="number" value={betConfig.bigClear} onChange={(e) => setBetConfig({...betConfig, bigClear: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 px-4 focus:ring-0 text-3xl font-mono font-black text-slate-100" />
+                      <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group">
+                        <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-sm group-hover:text-amber-400">大摸</div>
+                        <input type="number" readOnly={!isHost && isConnected} value={betConfig.bigClear} onChange={(e) => setBetConfig({...betConfig, bigClear: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 focus:ring-0 text-3xl font-mono font-black text-slate-100" />
                       </div>
-                      <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group hover:border-slate-700 transition-all">
-                        <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-sm shadow-inner group-hover:text-indigo-400 transition-colors">小摸</div>
-                        <input type="number" value={betConfig.smallClear} onChange={(e) => setBetConfig({...betConfig, smallClear: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 px-4 focus:ring-0 text-3xl font-mono font-black text-slate-100" />
+                      <div className="bg-slate-950/60 border border-slate-800/50 rounded-3xl p-5 flex items-center gap-6 group">
+                        <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center font-black border border-slate-800 text-slate-200 text-sm group-hover:text-indigo-400">小摸</div>
+                        <input type="number" readOnly={!isHost && isConnected} value={betConfig.smallClear} onChange={(e) => setBetConfig({...betConfig, smallClear: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 focus:ring-0 text-3xl font-mono font-black text-slate-100" />
                       </div>
                       <div className="bg-red-500/5 border border-red-500/10 rounded-3xl p-5 flex items-center gap-6">
                         <div className="w-14 h-14 rounded-2xl bg-red-500/10 flex items-center justify-center border border-red-500/20"><AlertTriangle className="w-7 h-7 text-red-500" /></div>
-                        <input type="number" value={betConfig.foul} onChange={(e) => setBetConfig({...betConfig, foul: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 px-4 focus:ring-0 text-3xl font-mono font-black text-red-400" />
+                        <input type="number" readOnly={!isHost && isConnected} value={betConfig.foul} onChange={(e) => setBetConfig({...betConfig, foul: Number(e.target.value)})} className="w-full bg-transparent border-none py-3 focus:ring-0 text-3xl font-mono font-black text-red-400" />
                       </div>
                    </div>
                 </div>
               </div>
               
-              <button onClick={() => setGameState(GameState.SETUP)} className="w-full bg-emerald-600 hover:bg-emerald-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-emerald-600/20 active:scale-95 text-lg uppercase tracking-widest mt-8">
+              <button 
+                onClick={() => isHost || !isConnected ? setGameState(GameState.SETUP) : requestAction({action: 'GO_SETUP'})} 
+                disabled={!isHost && isConnected}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 py-6 rounded-[2rem] font-black text-white transition-all shadow-xl shadow-emerald-600/20 active:scale-95 text-lg uppercase tracking-widest mt-8 disabled:opacity-50"
+              >
                 Continue to Players
               </button>
             </div>
@@ -359,9 +510,7 @@ const App: React.FC = () => {
           <div className="max-w-2xl mx-auto animate-in slide-in-from-right-8 duration-500">
             <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md p-10 rounded-[3rem] space-y-8 shadow-2xl">
               <div className="flex items-center gap-4 mb-2">
-                <div className="p-3 bg-emerald-500/10 rounded-2xl">
-                  <UserPlus className="w-6 h-6 text-emerald-400" />
-                </div>
+                <div className="p-3 bg-emerald-500/10 rounded-2xl"><UserPlus className="w-6 h-6 text-emerald-400" /></div>
                 <h2 className="text-xl font-black">設定球員名稱</h2>
               </div>
               <div className="grid grid-cols-1 gap-4">
@@ -383,90 +532,51 @@ const App: React.FC = () => {
           <div className="space-y-8 animate-in slide-in-from-bottom-8 duration-700">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
               {currentOrder.map((p, i) => (
-                <div 
-                  key={p.id} 
-                  className={`p-6 rounded-[2.5rem] border backdrop-blur-sm transition-all shadow-2xl flex flex-col justify-between min-h-[380px] ${
-                    i === 0 
-                    ? 'bg-emerald-500/10 border-emerald-500/30 ring-1 ring-emerald-500/20' 
-                    : 'bg-slate-900/40 border-slate-800'
-                  }`}
-                >
+                <div key={p.id} className={`p-6 rounded-[2.5rem] border backdrop-blur-sm transition-all shadow-2xl flex flex-col justify-between min-h-[380px] ${i === 0 ? 'bg-emerald-500/10 border-emerald-500/30 ring-1 ring-emerald-500/20' : 'bg-slate-900/40 border-slate-800'}`}>
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
-                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black shadow-lg ${i === 0 ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
-                        {i + 1}
-                      </div>
-                      <button 
-                        onClick={() => handleFoul(p.id)}
-                        className="text-red-500/40 hover:text-red-500 p-2.5 rounded-2xl transition-all flex items-center gap-2 bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
-                      >
+                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black shadow-lg ${i === 0 ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500'}`}>{i + 1}</div>
+                      <button onClick={() => handleFoul(p.id)} className="text-red-500/40 hover:text-red-500 p-2.5 rounded-2xl transition-all flex items-center gap-2 bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20">
                         <AlertTriangle className="w-4 h-4" />
                         <span className="text-[10px] font-black uppercase tracking-tighter">Foul</span>
                       </button>
                     </div>
-
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className={`text-xl font-black ${i === 0 ? 'text-emerald-400' : 'text-slate-100'}`}>{p.name}</span>
                         {i === 0 && <span className="text-[8px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">開球</span>}
                         {i === 1 && <span className="text-[8px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter">第二</span>}
                       </div>
-                      <div className="text-sm font-bold opacity-80">
-                        <MoneyDisplay val={playerBalances[p.id]} />
-                      </div>
+                      <div className="text-sm font-bold opacity-80"><MoneyDisplay val={playerBalances[p.id]} /></div>
                     </div>
                   </div>
-                  
                   <div className="space-y-3 mt-6">
                     {(i === 0 || i === 1) && (
                        <div className="mb-2">
                           {i === 0 && (
-                             <button
-                               onClick={() => handleClearTableAction(p.id, 'BIG_CLEAR')}
-                               className="w-full py-4 rounded-xl text-[11px] font-black bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg shadow-amber-900/30 hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
-                             >
-                               <Star className="w-4 h-4 fill-current" />
-                               大摸 (${betConfig.bigClear * 3})
+                             <button onClick={() => handleClearTableAction(p.id, 'BIG_CLEAR')} className="w-full py-4 rounded-xl text-[11px] font-black bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2">
+                               <Star className="w-4 h-4 fill-current" /> 大摸 (${betConfig.bigClear * 3})
                              </button>
                           )}
                           {i === 1 && (
-                             <button
-                               onClick={() => handleClearTableAction(p.id, 'SMALL_CLEAR')}
-                               className="w-full py-4 rounded-xl text-[11px] font-black bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg shadow-indigo-900/30 hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2"
-                             >
-                               <Star className="w-4 h-4 fill-current" />
-                               小摸 (${betConfig.smallClear * 3})
+                             <button onClick={() => handleClearTableAction(p.id, 'SMALL_CLEAR')} className="w-full py-4 rounded-xl text-[11px] font-black bg-gradient-to-r from-indigo-600 to-indigo-500 text-white shadow-lg hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-2">
+                               <Star className="w-4 h-4 fill-current" /> 小摸 (${betConfig.smallClear * 3})
                              </button>
                           )}
                        </div>
                     )}
-
                     <div className={`grid ${availableBalls.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
                       {availableBalls.map(ball => (
-                        <button
-                          key={ball}
-                          onClick={() => handleAction(p.id, ball, false)}
-                          className={`py-4 rounded-xl text-sm font-black border transition-all active:scale-[0.95] shadow-md flex items-center justify-center gap-1 ${
-                            ball === 9 
-                            ? 'bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500' 
-                            : 'bg-slate-950/80 border-slate-700/50 text-slate-300 hover:bg-slate-800'
-                          }`}
-                        >
+                        <button key={ball} onClick={() => handleAction(p.id, ball, false)} className={`py-4 rounded-xl text-sm font-black border transition-all active:scale-[0.95] shadow-md flex items-center justify-center gap-1 ${ball === 9 ? 'bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500' : 'bg-slate-950/80 border-slate-700/50 text-slate-300 hover:bg-slate-800'}`}>
                           進 {ball}
                         </button>
                       ))}
                     </div>
-
                     {i === 0 && (
                       <div className={`grid ${availableBalls.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 border-t border-slate-800 pt-3`}>
                          {availableBalls.map(ball => (
-                          <button
-                            key={`all-${ball}`}
-                            onClick={() => handleAction(p.id, ball, true)}
-                            className="py-3 rounded-xl text-[10px] font-black bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition-all active:scale-95 flex items-center justify-center gap-1"
-                          >
-                            <Zap className="w-3 h-3" />
-                            {ball} 全收
+                          <button key={`all-${ball}`} onClick={() => handleAction(p.id, ball, true)} className="py-3 rounded-xl text-[10px] font-black bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition-all flex items-center justify-center gap-1">
+                            <Zap className="w-3 h-3" /> {ball} 全收
                           </button>
                         ))}
                       </div>
@@ -476,38 +586,36 @@ const App: React.FC = () => {
               ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-              <div className="space-y-4">
-                <button onClick={() => setShowHistory(!showHistory)} className="w-full flex items-center justify-between p-6 bg-slate-900/40 border border-slate-800/80 rounded-[2rem] hover:bg-slate-900 transition-all shadow-xl group">
-                  <div className="flex items-center gap-4 text-slate-400 group-hover:text-slate-200 transition-colors">
-                    <History className="w-5 h-5" />
-                    <span className="text-sm font-black uppercase tracking-widest">Match History ({history.length})</span>
-                  </div>
-                  {showHistory ? <ChevronDown className="w-5 h-5 text-slate-600" /> : <ChevronUp className="w-5 h-5 text-slate-600" />}
-                </button>
-                {showHistory && (
-                  <div className="space-y-2 max-h-[280px] overflow-y-auto pr-2 no-scrollbar animate-in slide-in-from-top-4 duration-500">
-                    {history.length === 0 ? (
-                      <div className="text-center py-10 text-slate-700 bg-slate-900/20 rounded-3xl border border-dashed border-slate-800"><p className="text-xs font-black uppercase tracking-widest italic opacity-50">No history yet</p></div>
-                    ) : (
-                      history.map(h => (
-                        <div key={h.id} className="bg-slate-950/60 border border-slate-900/50 p-4 rounded-2xl flex justify-between items-center group transition-colors hover:bg-slate-900">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-1.5 h-1.5 rounded-full ${h.type === 'FOUL' ? 'bg-red-500' : 'bg-emerald-500'}`} />
-                            <div className="text-[11px] font-bold">
-                              {h.type === 'FOUL' ? <span className="text-red-400/90">Penalty: {h.fouler}</span> : 
-                               h.type === 'BIG_CLEAR' ? <span className="text-amber-400 font-black">大摸 by {h.winner}</span> :
-                               h.type === 'SMALL_CLEAR' ? <span className="text-indigo-400 font-black">小摸 by {h.winner}</span> :
-                               <span className="text-slate-300"><span className="text-emerald-400">{h.winner}</span> scored {h.ball} {h.isCollectAll && <span className="text-amber-500 font-black ml-1">[全收]</span>} <span className="text-slate-600 mx-1">/</span> {h.sitter}</span>}
-                            </div>
+            <div className="space-y-4">
+              <button onClick={() => setShowHistory(!showHistory)} className="w-full flex items-center justify-between p-6 bg-slate-900/40 border border-slate-800/80 rounded-[2rem] hover:bg-slate-900 transition-all shadow-xl group">
+                <div className="flex items-center gap-4 text-slate-400 group-hover:text-slate-200 transition-colors">
+                  <History className="w-5 h-5" />
+                  <span className="text-sm font-black uppercase tracking-widest">Match History ({history.length})</span>
+                </div>
+                {showHistory ? <ChevronDown className="w-5 h-5 text-slate-600" /> : <ChevronUp className="w-5 h-5 text-slate-600" />}
+              </button>
+              {showHistory && (
+                <div className="space-y-2 max-h-[280px] overflow-y-auto pr-2 no-scrollbar animate-in slide-in-from-top-4 duration-500">
+                  {history.length === 0 ? (
+                    <div className="text-center py-10 text-slate-700 bg-slate-900/20 rounded-3xl border border-dashed border-slate-800"><p className="text-xs font-black uppercase tracking-widest italic opacity-50">No history yet</p></div>
+                  ) : (
+                    history.map(h => (
+                      <div key={h.id} className="bg-slate-950/60 border border-slate-900/50 p-4 rounded-2xl flex justify-between items-center group transition-colors hover:bg-slate-900">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-1.5 h-1.5 rounded-full ${h.type === 'FOUL' ? 'bg-red-500' : 'bg-emerald-500'}`} />
+                          <div className="text-[11px] font-bold">
+                            {h.type === 'FOUL' ? <span className="text-red-400/90">Penalty: {h.fouler}</span> : 
+                             h.type === 'BIG_CLEAR' ? <span className="text-amber-400 font-black">大摸 by {h.winner}</span> :
+                             h.type === 'SMALL_CLEAR' ? <span className="text-indigo-400 font-black">小摸 by {h.winner}</span> :
+                             <span className="text-slate-300"><span className="text-emerald-400">{h.winner}</span> scored {h.ball} {h.isCollectAll && <span className="text-amber-500 font-black ml-1">[全收]</span>} <span className="text-slate-600 mx-1">/</span> {h.sitter}</span>}
                           </div>
-                          <span className={`text-[11px] font-mono font-black ${h.type === 'FOUL' ? 'text-amber-500' : 'text-slate-500'}`}>{h.type === 'FOUL' ? `+${h.amount}` : `$${h.amount}`}</span>
                         </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+                        <span className={`text-[11px] font-mono font-black ${h.type === 'FOUL' ? 'text-amber-500' : 'text-slate-500'}`}>{h.type === 'FOUL' ? `+${h.amount}` : `$${h.amount}`}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row gap-6 mt-12">
@@ -570,7 +678,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-16 py-10 text-center border-t border-slate-900/50">
-        <p className="text-[10px] text-slate-800 font-black uppercase tracking-[0.5em] hover:text-slate-700 transition-colors">Billiards Rotation Order Tracker Engine v2.0</p>
+        <p className="text-[10px] text-slate-800 font-black uppercase tracking-[0.5em] hover:text-slate-700 transition-colors">Billiards Rotation Order Tracker Engine v2.1 (P2P Linked)</p>
       </footer>
     </div>
   );
