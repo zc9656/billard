@@ -4,10 +4,9 @@ export interface Player {
   name: string;
   color: string;
   earnings: number;
-  isReady?: boolean;
 }
 
-export type BetMode = '369' | '59' | '9';
+export type BetMode = '369' | '59' | '9' | 'SEQUENCE';
 
 export interface BetConfig {
   mode: BetMode;
@@ -31,10 +30,9 @@ export interface RoundHistory {
 }
 
 export enum GameState {
-  HOME = 'HOME',
   MODE_SELECT = 'MODE_SELECT',
   BET_CONFIG = 'BET_CONFIG',
-  WAITING = 'WAITING',
+  SETUP = 'SETUP',
   PLAYING = 'PLAYING',
   SUMMARY = 'SUMMARY'
 }

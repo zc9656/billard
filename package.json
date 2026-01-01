@@ -15,8 +15,7 @@
   "dependencies": {
     "lucide-react": "^0.460.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "peerjs": "^1.5.4"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
