@@ -4,6 +4,12 @@ export interface Player {
   name: string;
   color: string;
   earnings: number;
+  foulCount: number;
+  totalFoulPaid: number;
+  won5Count: number;
+  lost5Count: number;
+  won9Count: number;
+  lost9Count: number;
 }
 
 export type BetMode = '369' | '59' | '9' | 'SEQUENCE';
