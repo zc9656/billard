@@ -2,10 +2,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Player, RoundHistory, GameState, BetMode, BetConfig } from './types';
 import { DEFAULT_COLORS, INITIAL_NAMES } from './constants';
-import { getGeminiCommentary } from './services/geminiService';
 import { 
   Trophy, RefreshCcw, UserPlus, Play, RotateCcw, 
-  MessageSquareQuote, History, CheckCircle2, 
+  History, CheckCircle2, 
   ChevronRight, DollarSign, Settings2, AlertTriangle,
   Coins, User, ChevronDown, ChevronUp, BarChart3, Home,
   ArrowLeft, Zap, Star, ShieldCheck
@@ -26,8 +25,6 @@ const App: React.FC = () => {
   const [currentOrder, setCurrentOrder] = useState<Player[]>([]);
   const [history, setHistory] = useState<RoundHistory[]>([]);
   const [commonPot, setCommonPot] = useState(0);
-  const [commentary, setCommentary] = useState<string>('');
-  const [isLoadingCommentary, setIsLoadingCommentary] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   
   const [availableBalls, setAvailableBalls] = useState<number[]>([]);
@@ -74,7 +71,6 @@ const App: React.FC = () => {
       setHistory([]);
       setCommonPot(0);
       setPlayers(prev => prev.map(p => ({ ...p, earnings: 0 })));
-      setCommentary('');
       setShowHistory(false);
     }
   };
@@ -183,13 +179,6 @@ const App: React.FC = () => {
     } as any, ...prev]);
   };
 
-  const fetchCommentary = useCallback(async () => {
-    setIsLoadingCommentary(true);
-    const text = await getGeminiCommentary(players, currentOrder, history as any);
-    setCommentary(text);
-    setIsLoadingCommentary(false);
-  }, [players, currentOrder, history]);
-
   const MoneyDisplay = ({ val }: { val: number }) => (
     <span className={`font-mono font-bold ${val >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
       {val >= 0 ? '+' : ''}{val}
@@ -276,7 +265,6 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-grow">
-        {/* Mode Selection and Setup code remains similar, keeping it concise... */}
         {gameState === GameState.MODE_SELECT && (
           <div className="max-w-4xl mx-auto space-y-12 animate-in fade-in zoom-in-95 duration-500 py-12">
             <div className="text-center space-y-2">
@@ -367,7 +355,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* SETUP state code remains mostly unchanged, skipping for brevity but assuming it is there... */}
         {gameState === GameState.SETUP && (
           <div className="max-w-2xl mx-auto animate-in slide-in-from-right-8 duration-500">
             <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-md p-10 rounded-[3rem] space-y-8 shadow-2xl">
@@ -431,7 +418,6 @@ const App: React.FC = () => {
                   </div>
                   
                   <div className="space-y-3 mt-6">
-                    {/* Clear Options with Highlighted Styles */}
                     {(i === 0 || i === 1) && (
                        <div className="mb-2">
                           {i === 0 && (
@@ -455,7 +441,6 @@ const App: React.FC = () => {
                        </div>
                     )}
 
-                    {/* Standard Ball Buttons - GRID LAYOUT TO ENSURE SAME SIZE */}
                     <div className={`grid ${availableBalls.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
                       {availableBalls.map(ball => (
                         <button
@@ -472,7 +457,6 @@ const App: React.FC = () => {
                       ))}
                     </div>
 
-                    {/* Collect All Grid - ONLY for Breaker */}
                     {i === 0 && (
                       <div className={`grid ${availableBalls.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 border-t border-slate-800 pt-3`}>
                          {availableBalls.map(ball => (
@@ -492,23 +476,7 @@ const App: React.FC = () => {
               ))}
             </div>
 
-            {/* AI Commentary and History... */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 bg-slate-900/30 border border-slate-800/50 p-8 rounded-[2.5rem] shadow-xl space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-3">
-                    <MessageSquareQuote className="w-5 h-5 text-emerald-500" />
-                    AI Commentary
-                  </span>
-                  <button onClick={fetchCommentary} disabled={isLoadingCommentary} className="text-[10px] font-black uppercase tracking-widest text-emerald-500 hover:text-emerald-400 transition-colors bg-emerald-500/5 px-4 py-2 rounded-xl border border-emerald-500/10">
-                    {isLoadingCommentary ? 'Analyzing...' : 'Refresh Tips'}
-                  </button>
-                </div>
-                <p className="text-base text-slate-400 italic leading-relaxed font-medium pl-4 border-l-2 border-emerald-500/20">
-                  {commentary || "Waiting for the first shot... Tap a score button to get strategic insights."}
-                </p>
-              </div>
-
+            <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
               <div className="space-y-4">
                 <button onClick={() => setShowHistory(!showHistory)} className="w-full flex items-center justify-between p-6 bg-slate-900/40 border border-slate-800/80 rounded-[2rem] hover:bg-slate-900 transition-all shadow-xl group">
                   <div className="flex items-center gap-4 text-slate-400 group-hover:text-slate-200 transition-colors">
@@ -553,7 +521,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* SUMMARY logic updated with clear counts... */}
         {gameState === GameState.SUMMARY && (
           <div className="max-w-6xl mx-auto animate-in fade-in duration-700">
             <div className="bg-slate-900/40 border border-slate-800/80 backdrop-blur-xl p-10 md:p-16 rounded-[4rem] space-y-12 shadow-2xl">
