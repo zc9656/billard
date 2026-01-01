@@ -1,0 +1,5 @@
+{
+  "name": "撞球追分順序",
+  "description": "A professional billiards rotation tracker for 4 players. Automatically calculates the next round's order based on specific 'Sitter' rules where the winner takes the lead and the sitter's predecessor moves to the back.",
+  "requestFramePermissions": []
+}
