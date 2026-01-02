@@ -343,14 +343,17 @@ const App: React.FC = () => {
           <div className="max-w-2xl mx-auto animate-in slide-in-from-bottom-8 pb-12">
             <div className="bg-slate-900 border border-slate-800 p-10 rounded-[3rem] space-y-8 shadow-2xl">
               <h2 className="text-2xl font-black flex items-center gap-3"><Settings2 className="text-emerald-500" /> 設定獎金金額</h2>
-              <div className="space-y-4">
-                 {Object.keys(betConfig.amounts).map(ball => (
-                  <div key={ball} className="bg-slate-950 p-5 rounded-3xl flex items-center justify-between border border-slate-800">
-                    <span className="text-xl font-black text-slate-400">{ball} 號球獎金</span>
-                    <input type="number" value={betConfig.amounts[Number(ball)]} onChange={(e) => setBetConfig({...betConfig, amounts: {...betConfig.amounts, [Number(ball)]: Number(e.target.value)}})} className="bg-transparent text-right text-3xl font-mono font-black text-emerald-400 outline-none w-32" />
-                  </div>
-                ))}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-6">
+                 <div className="space-y-4">
+                  {Object.keys(betConfig.amounts).map(ball => (
+                    <div key={ball} className="bg-slate-950 p-5 rounded-3xl flex items-center justify-between border border-slate-800">
+                      <span className="text-xl font-black text-slate-400">{ball} 號球獎金</span>
+                      <input type="number" value={betConfig.amounts[Number(ball)]} onChange={(e) => setBetConfig({...betConfig, amounts: {...betConfig.amounts, [Number(ball)]: Number(e.target.value)}})} className="bg-transparent text-right text-3xl font-mono font-black text-emerald-400 outline-none w-32" />
+                    </div>
+                  ))}
+                 </div>
+
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="bg-amber-500/5 p-5 rounded-3xl flex items-center justify-between border border-amber-500/10">
                     <span className="text-lg font-black text-amber-500/80">大摸賞金</span>
                     <input type="number" value={betConfig.bigClear} onChange={(e) => setBetConfig({...betConfig, bigClear: Number(e.target.value)})} className="bg-transparent text-right text-2xl font-mono font-black text-amber-500 outline-none w-24" />
@@ -359,6 +362,14 @@ const App: React.FC = () => {
                     <span className="text-lg font-black text-amber-500/80">小摸賞金</span>
                     <input type="number" value={betConfig.smallClear} onChange={(e) => setBetConfig({...betConfig, smallClear: Number(e.target.value)})} className="bg-transparent text-right text-2xl font-mono font-black text-amber-500 outline-none w-24" />
                   </div>
+                </div>
+
+                <div className="bg-red-500/5 p-6 rounded-3xl flex items-center justify-between border border-red-500/10">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-500" />
+                    <span className="text-lg font-black text-red-500/80">每次犯規金額</span>
+                  </div>
+                  <input type="number" value={betConfig.foul} onChange={(e) => setBetConfig({...betConfig, foul: Number(e.target.value)})} className="bg-transparent text-right text-3xl font-mono font-black text-red-500 outline-none w-32" />
                 </div>
               </div>
               <button onClick={() => setGameState(GameState.SETUP)} className="w-full bg-emerald-600 py-6 rounded-3xl font-black text-xl shadow-lg hover:bg-emerald-500 transition-all">確認並繼續</button>
@@ -420,7 +431,7 @@ const App: React.FC = () => {
                               <button onClick={() => handleClearTableAction(p.id, 'BIG_CLEAR')} className="w-full py-4 bg-amber-500 hover:bg-amber-400 rounded-2xl font-black text-[11px] flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-slate-950"><Star className="w-3 h-3 fill-slate-950" /> 大摸 (${betConfig.bigClear * (playerCount - 1)})</button>
                             )}
                             {i === 1 && (
-                              <button onClick={() => handleClearTableAction(p.id, 'SMALL_CLEAR')} className="w-full py-4 bg-amber-600 hover:bg-amber-500 rounded-2xl font-black text-[11px] flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-white"><Sparkles className="w-3 h-3 fill-white" /> 小摸 (${betConfig.smallClear})</button>
+                              <button onClick={() => handleClearTableAction(p.id, 'SMALL_CLEAR')} className="w-full py-4 bg-amber-600 hover:bg-amber-400 rounded-2xl font-black text-[11px] flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all text-white"><Sparkles className="w-3 h-3 fill-white" /> 小摸 (${betConfig.smallClear})</button>
                             )}
                           </div>
                           <div className="grid grid-cols-2 gap-2">
@@ -610,7 +621,7 @@ const App: React.FC = () => {
 
       <footer className="mt-16 text-center">
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900/50 rounded-full border border-slate-800">
-           <span className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em]">Billiards Tracker Pro v3.8</span>
+           <span className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em]">Billiards Tracker Pro v3.9</span>
         </div>
       </footer>
     </div>
