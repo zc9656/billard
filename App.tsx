@@ -1,13 +1,13 @@
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { Player, RoundHistory, GameState, BetMode, BetConfig } from './types';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Player, RoundHistory, GameState, BetMode, BetConfig, GameSnapshot } from './types';
 import { DEFAULT_COLORS, INITIAL_NAMES } from './constants';
 import { 
   Trophy, UserPlus, Play, RotateCcw, 
   ChevronRight, Settings2, AlertTriangle,
-  Coins, BarChart3, Home,
+  Coins, BarChart3, Home, Undo2,
   ArrowLeft, Star, ListOrdered, Target, Users, Layers, Sparkles, Hash,
-  Wallet, Receipt
+  Wallet, Receipt, History, Clock, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -26,13 +26,14 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<RoundHistory[]>([]);
   const [commonPot, setCommonPot] = useState(0);
   const [availableBalls, setAvailableBalls] = useState<number[]>([]);
-  
-  // 對戰矩陣：matrix[winnerId][loserId] = amount
   const [vsMatrix, setVsMatrix] = useState<{[key: string]: {[key: string]: number}}>({});
+  
+  // 用於恢復上一動的快照堆疊
+  const [snapshotStack, setSnapshotStack] = useState<GameSnapshot[]>([]);
 
   const isSequenceMode = betConfig.mode === 'SEQUENCE';
 
-  // 初始化球員資料
+  // 初始化
   useEffect(() => {
     if (gameState === GameState.MODE_SELECT) {
       const initialPlayers = Array.from({ length: playerCount }, (_, i) => ({
@@ -49,6 +50,8 @@ const App: React.FC = () => {
       }));
       setPlayers(initialPlayers);
       setCurrentRound(1);
+      setHistory([]);
+      setSnapshotStack([]);
       
       const initialMatrix: any = {};
       initialPlayers.forEach(p1 => {
@@ -61,12 +64,37 @@ const App: React.FC = () => {
     }
   }, [playerCount, gameState]);
 
-  // 初始化可用球號
   useEffect(() => {
     if (!isSequenceMode && (gameState === GameState.PLAYING || gameState === GameState.SETUP || gameState === GameState.BET_CONFIG)) {
       setAvailableBalls(Object.keys(betConfig.amounts).map(Number).sort((a, b) => a - b));
     }
   }, [betConfig.mode, gameState, isSequenceMode]);
+
+  const saveSnapshot = () => {
+    const snapshot: GameSnapshot = {
+      players: JSON.parse(JSON.stringify(players)),
+      currentOrder: JSON.parse(JSON.stringify(currentOrder)),
+      commonPot,
+      availableBalls: [...availableBalls],
+      vsMatrix: JSON.parse(JSON.stringify(vsMatrix)),
+      currentRound,
+      history: [...history]
+    };
+    setSnapshotStack(prev => [...prev, snapshot]);
+  };
+
+  const handleUndo = () => {
+    if (snapshotStack.length === 0) return;
+    const lastSnapshot = snapshotStack[snapshotStack.length - 1];
+    setPlayers(lastSnapshot.players);
+    setCurrentOrder(lastSnapshot.currentOrder);
+    setCommonPot(lastSnapshot.commonPot);
+    setAvailableBalls(lastSnapshot.availableBalls);
+    setVsMatrix(lastSnapshot.vsMatrix);
+    setCurrentRound(lastSnapshot.currentRound);
+    setHistory(lastSnapshot.history);
+    setSnapshotStack(prev => prev.slice(0, -1));
+  };
 
   const updatePlayerName = (id: string, name: string) => {
     setPlayers(prev => prev.map(p => p.id === id ? { ...p, name } : p));
@@ -93,11 +121,6 @@ const App: React.FC = () => {
   const performReset = (force = false) => {
     if (force || window.confirm('確定要回到首頁嗎？目前的進度將消失。')) {
       setGameState(GameState.MODE_SELECT);
-      setHistory([]);
-      setCommonPot(0);
-      setPlayers(prev => prev.map(p => ({ 
-        ...p, earnings: 0, foulCount: 0, totalFoulPaid: 0, won5Count: 0, lost5Count: 0, won9Count: 0, lost9Count: 0 
-      })));
     }
   };
 
@@ -114,9 +137,7 @@ const App: React.FC = () => {
   };
 
   const triggerOrderChange = (winnerId: string) => {
-    // 獲取最新的 players 數據進行順序變換
     const currentOrderWithFreshData = currentOrder.map(co => players.find(p => p.id === co.id) || co);
-    
     const winnerIdx = currentOrderWithFreshData.findIndex(p => p.id === winnerId);
     const winner = currentOrderWithFreshData[winnerIdx];
     const sitterIdx = (winnerIdx - 1 + playerCount) % playerCount;
@@ -126,17 +147,16 @@ const App: React.FC = () => {
     
     setCurrentOrder(nextOrder);
     setCurrentRound(prev => prev + 1);
-    
     if (!isSequenceMode) {
       setAvailableBalls(Object.keys(betConfig.amounts).map(Number).sort((a, b) => a - b));
     }
   };
 
   const handleAction = (winnerId: string, ball: number, isCollectAll: boolean = false) => {
+    saveSnapshot();
+    const winner = players.find(p => p.id === winnerId)!;
     const winnerIdx = currentOrder.findIndex(p => p.id === winnerId);
-    const winner = currentOrder[winnerIdx];
-    const sitterIdx = (winnerIdx - 1 + playerCount) % playerCount;
-    const sitter = currentOrder[sitterIdx];
+    const sitter = players.find(p => p.id === currentOrder[(winnerIdx - 1 + playerCount) % playerCount].id)!;
 
     if (!isSequenceMode) {
       const amount = betConfig.amounts[ball] || 0;
@@ -155,6 +175,15 @@ const App: React.FC = () => {
       }));
 
       updateVsMatrix(winner.id, isCollectAll ? otherIds : [sitter.id], amount);
+      
+      setHistory(prev => [{
+        id: Math.random().toString(36).substr(2, 9),
+        timestamp: Date.now(),
+        type: isCollectAll ? 'COLLECT_ALL' : 'WIN',
+        ball,
+        winnerName: winner.name,
+        amount: isCollectAll ? amount * (playerCount - 1) : amount
+      }, ...prev]);
     }
 
     if (ball === 9 || isSequenceMode) {
@@ -166,6 +195,8 @@ const App: React.FC = () => {
 
   const handleFoul = (playerId: string) => {
     if (isSequenceMode) return;
+    saveSnapshot();
+    const fouler = players.find(p => p.id === playerId)!;
     setPlayers(prev => prev.map(p => 
       p.id === playerId ? { 
         ...p, 
@@ -175,15 +206,22 @@ const App: React.FC = () => {
       } : p
     ));
     setCommonPot(prev => prev + betConfig.foul);
+    setHistory(prev => [{
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: Date.now(),
+      type: 'FOUL',
+      foulerName: fouler.name,
+      amount: betConfig.foul
+    }, ...prev]);
   };
 
   const handleClearTableAction = (winnerId: string, type: 'BIG_CLEAR' | 'SMALL_CLEAR') => {
     if (isSequenceMode) return;
+    saveSnapshot();
+    const winner = players.find(p => p.id === winnerId)!;
     const winnerIdx = currentOrder.findIndex(p => p.id === winnerId);
-    const winner = currentOrder[winnerIdx];
     const amount = type === 'BIG_CLEAR' ? betConfig.bigClear : betConfig.smallClear;
-    const sitterIdx = (winnerIdx - 1 + playerCount) % playerCount;
-    const sitter = currentOrder[sitterIdx];
+    const sitterId = currentOrder[(winnerIdx - 1 + playerCount) % playerCount].id;
     const otherIds = currentOrder.filter(p => p.id !== winner.id).map(p => p.id);
 
     setPlayers(prev => prev.map(p => {
@@ -192,12 +230,19 @@ const App: React.FC = () => {
         return { ...p, earnings: p.earnings - amount, lost9Count: p.lost9Count + 1 };
       } else {
         if (p.id === winner.id) return { ...p, earnings: p.earnings + amount, won9Count: p.won9Count + 1 };
-        if (p.id === sitter.id) return { ...p, earnings: p.earnings - amount, lost9Count: p.lost9Count + 1 };
+        if (p.id === sitterId) return { ...p, earnings: p.earnings - amount, lost9Count: p.lost9Count + 1 };
         return p;
       }
     }));
 
-    updateVsMatrix(winner.id, type === 'BIG_CLEAR' ? otherIds : [sitter.id], amount);
+    updateVsMatrix(winner.id, type === 'BIG_CLEAR' ? otherIds : [sitterId], amount);
+    setHistory(prev => [{
+      id: Math.random().toString(36).substr(2, 9),
+      timestamp: Date.now(),
+      type,
+      winnerName: winner.name,
+      amount: type === 'BIG_CLEAR' ? amount * (playerCount - 1) : amount
+    }, ...prev]);
     triggerOrderChange(winnerId);
   };
 
@@ -206,7 +251,7 @@ const App: React.FC = () => {
       <header className="mb-8">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-4 cursor-pointer" onClick={() => performReset(true)}>
-            <div className="p-3 bg-emerald-500/10 rounded-2xl border border-emerald-500/20">
+            <div className="p-3 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
               <Coins className="w-6 h-6 text-emerald-400" />
             </div>
             <div>
@@ -227,9 +272,18 @@ const App: React.FC = () => {
               </div>
             )}
             {gameState === GameState.PLAYING && (
-              <button onClick={() => performReset(false)} className="p-3 bg-slate-900 hover:bg-slate-800 rounded-xl text-slate-500 hover:text-red-400 transition-all border border-slate-800">
-                <RotateCcw className="w-5 h-5" />
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleUndo} 
+                  disabled={snapshotStack.length === 0}
+                  className={`p-3 rounded-xl border transition-all ${snapshotStack.length > 0 ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-400 hover:bg-indigo-600/40' : 'bg-slate-900 border-slate-800 text-slate-700 cursor-not-allowed'}`}
+                >
+                  <Undo2 className="w-5 h-5" />
+                </button>
+                <button onClick={() => performReset(false)} className="p-3 bg-slate-900 hover:bg-slate-800 rounded-xl text-slate-500 hover:text-red-400 transition-all border border-slate-800">
+                  <RotateCcw className="w-5 h-5" />
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -392,9 +446,39 @@ const App: React.FC = () => {
               })}
             </div>
 
+            {/* 即時動態 */}
+            {!isSequenceMode && history.length > 0 && (
+              <div className="max-w-2xl mx-auto bg-slate-900/40 border border-slate-800 rounded-3xl p-6">
+                <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Clock className="w-3 h-3" /> 最近動態
+                </h4>
+                <div className="space-y-3">
+                  {history.slice(0, 3).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between bg-slate-950/40 p-3 rounded-xl border border-slate-800/50 animate-in slide-in-from-left-2">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-lg ${item.type === 'FOUL' ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                          {item.type === 'FOUL' ? <AlertTriangle className="w-4 h-4" /> : <Trophy className="w-4 h-4" />}
+                        </div>
+                        <div className="text-sm font-bold">
+                          {item.type === 'FOUL' ? (
+                            <span className="text-slate-300">{item.foulerName} 犯規</span>
+                          ) : (
+                            <span className="text-slate-300">{item.winnerName} {item.type === 'BIG_CLEAR' ? '大摸' : item.type === 'SMALL_CLEAR' ? '小摸' : `進 ${item.ball} 號`}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className={`text-sm font-black font-mono ${item.type === 'FOUL' ? 'text-red-400' : 'text-emerald-400'}`}>
+                        {item.type === 'FOUL' ? '-' : '+'}${item.amount}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-6 max-w-2xl mx-auto mt-12">
                {!isSequenceMode && (
-                 <button onClick={() => setGameState(GameState.SUMMARY)} className="flex-grow bg-slate-900 border border-slate-800 py-6 rounded-3xl font-black flex items-center justify-center gap-4 hover:bg-slate-800 transition-all shadow-xl"><BarChart3 className="text-indigo-400" /> 結算成績</button>
+                 <button onClick={() => setGameState(GameState.SUMMARY)} className="flex-grow bg-slate-900 border border-slate-800 py-6 rounded-3xl font-black flex items-center justify-center gap-4 hover:bg-slate-800 transition-all shadow-xl shadow-emerald-500/5"><BarChart3 className="text-indigo-400" /> 結算成績</button>
                )}
                <button onClick={() => performReset(false)} className="flex-grow bg-red-600/10 text-red-500 py-6 rounded-3xl font-black flex items-center justify-center gap-4 hover:bg-red-600 hover:text-white transition-all shadow-xl"><Home /> 回到首頁</button>
             </div>
@@ -452,6 +536,41 @@ const App: React.FC = () => {
               })}
             </div>
 
+            {/* 歷史對局回顧 */}
+            <div className="bg-slate-900 p-10 rounded-[3rem] border border-slate-800 space-y-8 shadow-2xl">
+               <h3 className="text-2xl font-black flex items-center gap-3"><History className="text-amber-500" /> 歷史賽程回顧</h3>
+               <div className="space-y-4 max-h-[400px] overflow-y-auto pr-4 no-scrollbar">
+                  {history.map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-6 p-4 bg-slate-950/50 rounded-2xl border border-slate-800 hover:border-slate-700 transition-all">
+                       <div className="text-slate-600 font-black text-sm w-12 shrink-0">#{history.length - idx}</div>
+                       <div className={`p-3 rounded-xl ${item.type === 'FOUL' ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                          {item.type === 'FOUL' ? <AlertTriangle className="w-5 h-5" /> : item.type === 'BIG_CLEAR' ? <Star className="w-5 h-5" /> : <Trophy className="w-5 h-5" />}
+                       </div>
+                       <div className="flex-grow">
+                          <div className="font-black text-slate-200">
+                             {item.type === 'FOUL' ? (
+                               <span>{item.foulerName} 發生犯規，支付公池金額</span>
+                             ) : item.type === 'BIG_CLEAR' ? (
+                               <span>{item.winnerName} 完成大摸，全收對手賞金</span>
+                             ) : item.type === 'SMALL_CLEAR' ? (
+                               <span>{item.winnerName} 完成小摸，拿走上家賞金</span>
+                             ) : (
+                               <span>{item.winnerName} 進了 {item.ball} 號球</span>
+                             )}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">
+                             {new Date(item.timestamp).toLocaleTimeString()}
+                          </div>
+                       </div>
+                       <div className={`text-lg font-mono font-black flex items-center gap-2 ${item.type === 'FOUL' ? 'text-red-400' : 'text-emerald-400'}`}>
+                          {item.type === 'FOUL' ? <ArrowDownRight className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                          ${item.amount}
+                       </div>
+                    </div>
+                  ))}
+               </div>
+            </div>
+
             {/* 誰剋誰矩陣 */}
             <div className="bg-slate-900 p-10 rounded-[3rem] border border-slate-800 space-y-8 shadow-2xl">
                <h3 className="text-2xl font-black flex items-center gap-3"><Users className="text-indigo-400" /> 誰剋誰 (對戰金額矩陣)</h3>
@@ -491,7 +610,7 @@ const App: React.FC = () => {
 
       <footer className="mt-16 text-center">
         <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900/50 rounded-full border border-slate-800">
-           <span className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em]">Billiards Tracker Pro v3.7</span>
+           <span className="text-[10px] text-slate-600 font-black uppercase tracking-[0.3em]">Billiards Tracker Pro v3.8</span>
         </div>
       </footer>
     </div>

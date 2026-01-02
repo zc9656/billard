@@ -25,14 +25,22 @@ export interface BetConfig {
 export interface RoundHistory {
   id: string;
   timestamp: number;
-  type: 'WIN' | 'FOUL' | 'BIG_CLEAR' | 'SMALL_CLEAR';
+  type: 'WIN' | 'FOUL' | 'BIG_CLEAR' | 'SMALL_CLEAR' | 'COLLECT_ALL';
   ball?: number;
-  winner?: string;
-  sitter?: string;
-  fouler?: string;
+  winnerName?: string;
+  foulerName?: string;
   amount: number;
-  potUpdate?: number;
-  isCollectAll?: boolean;
+  playerBalances?: { [playerId: string]: number };
+}
+
+export interface GameSnapshot {
+  players: Player[];
+  currentOrder: Player[];
+  commonPot: number;
+  availableBalls: number[];
+  vsMatrix: { [key: string]: { [key: string]: number } };
+  currentRound: number;
+  history: RoundHistory[];
 }
 
 export enum GameState {
